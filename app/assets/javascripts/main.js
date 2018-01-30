@@ -195,9 +195,13 @@ function SearchParameters() {
         Cookies.set('search', search);
     };
 
-    var reset = function() {
+    var _reset = function() {
         search = defaultState;
         update();
+    };
+
+    this.reset = function() {
+        _reset();
     };
 
     var getValue = function(key) {
@@ -222,7 +226,7 @@ function SearchParameters() {
 
     this.qsUpdate = function(resetCookie) {
         if (resetCookie) {
-            reset();
+            _reset();
         }
         setValueByQS("pid", "projectId", parseInt);
         setValueByQS("ps", "projectSearch");

@@ -167,8 +167,6 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
       case Some(value) => value
       case None => throw new UniqueViolationException(s"Challenge with name ${challenge.name} already exists in the database")
     }
-
-
   }
 
   /**
@@ -559,7 +557,8 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
     * query string. It will apply ONLY the following parameters:
     * - projectId (pid) = If searching only within a particular project, and the MapRoulette ID for that project
     * - projectSearch (ps) = A text search based on the name of the project, will be ignored if projectId has been set
-    * - projectEnabled (pe) = Whether to only include projects that are enabled, will be ignored if projectId has been set
+    * - projectEnabled (pe) = Whether to only include projects that are enabled, will be ignored if projectId has been set, by default will be true
+    * - challengeEnabled (ce) = Whether to only include challenges that are enabled, by default will be true
     * - challengeSearch (cs) = A text search based on the name of the challenge
     * - challengeTags (ct) = A comma separated list of tags to check if the challenge contains any of the
     *     provided tags, can use challengeTagConjunction (ctt) to switch from inclusive to exclusive
@@ -584,11 +583,6 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
 
       parameters ++= addSearchToQuery(searchParameters, whereClause)
 
-      searchParameters.projectId match {
-        case Some(pid) if pid > -1 => //ignore
-        case _ => joinClause ++= "INNER JOIN projects p ON p.id = c.parent_id "
-      }
-
       parameters ++= addChallengeTagMatchingToQuery(searchParameters, whereClause, joinClause)
 
       searchParameters.owner match {
@@ -611,9 +605,20 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
         case None =>
       }
 
+      searchParameters.projectEnabled match {
+        case Some(true) if searchParameters.projectId.isEmpty => this.appendInWhereClause(whereClause, this.enabled(true, "p")(None))
+        case _ =>
+      }
+
+      searchParameters.challengeEnabled match {
+        case Some(true) => this.appendInWhereClause(whereClause, this.enabled(true, "c")(None))
+        case _ =>
+      }
+
       val query =
         s"""
            |SELECT ${this.retrieveColumns} FROM challenges c
+           |INNER JOIN projects p ON p.id = c.parent_id
            |$joinClause
            |${if (whereClause.nonEmpty) { s"WHERE $whereClause" } else { "" }}
            |LIMIT ${this.sqlLimit(limit)} OFFSET $offset

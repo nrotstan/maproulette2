@@ -319,7 +319,7 @@ class ChallengeController @Inject()(override val childController: TaskController
       SearchParameters.withSearch { implicit params =>
         val challenges = this.dal.extendedFind(params, limit, page)
         if (challenges.isEmpty) {
-          NotFound
+          Ok(Json.toJson(List[JsValue]()))
         } else {
           val tags = this.tagDAL.listByChallenges(challenges.map(c => c.id))
           val projects = Some(this.dalManager.project.retrieveListById(-1, 0)(challenges.map(c => c.general.parent)).map(p => p.id -> p).toMap)
