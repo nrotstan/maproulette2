@@ -24,7 +24,7 @@ class SurveySpec @Inject() (projectDAL: ProjectDAL, surveyDAL: SurveyDAL) extend
     "write survey object to database" in new WithApplication {
       val projectID = projectDAL.insert(Project(-1, User.DEFAULT_SUPER_USER_ID, "RootProject_challengeTest", DateTime.now(), DateTime.now()), User.superUser).id
       val answers = List(Answer(-1, "Answer1"), Answer(-1, "Answer2"))
-      val newSurvey = Challenge(surveyID, "newSurvey", DateTime.now(), DateTime.now(), Some("This is a new survey"),
+      val newSurvey = Challenge(surveyID, "newSurvey", DateTime.now(), DateTime.now(), Some("This is a new survey"), false, None,
         ChallengeGeneral(-1, projectID, "Default Question"),
         ChallengeCreation(),
         ChallengePriority(),

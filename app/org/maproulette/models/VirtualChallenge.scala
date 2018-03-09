@@ -13,6 +13,7 @@ case class VirtualChallenge(override val id:Long,
                             override val created:DateTime,
                             override val modified:DateTime,
                             override val description:Option[String]=None,
+                            ownerId:Long,
                             searchParameters:SearchParameters,
                             expiry:DateTime) extends BaseObject[Long] with DefaultWrites {
 

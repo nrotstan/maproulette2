@@ -22,6 +22,14 @@ import scala.reflect.runtime.universe._
   */
 object Utils extends DefaultWrites {
 
+  class jsonWrites(key:String) extends Writes[String] {
+    override def writes(value:String) : JsValue = Json.parse(value)
+  }
+
+  class jsonReads(key:String) extends Reads[String] {
+    override def reads(value:JsValue) : JsResult[String] = JsSuccess(value.toString())
+  }
+
   /**
     * Checks to see if a string is a number
     *

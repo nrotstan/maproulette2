@@ -2,6 +2,7 @@ package org.maproulette.models.utils
 
 import org.joda.time.DateTime
 import org.maproulette.models._
+import org.maproulette.utils.Utils.{jsonReads, jsonWrites}
 import play.api.libs.functional.syntax._
 import play.api.libs.json._
 
@@ -23,16 +24,14 @@ trait ChallengeWrites {
   }
   implicit val challengeExtraWrites: Writes[ChallengeExtra] = Json.writes[ChallengeExtra]
 
-  class jsonWrites(key:String) extends Writes[String] {
-    override def writes(value:String) : JsValue = Json.parse(value)
-  }
-
   implicit val challengeWrites: Writes[Challenge] = (
     (JsPath \ "id").write[Long] and
     (JsPath \ "name").write[String] and
     (JsPath \ "created").write[DateTime] and
     (JsPath \ "modified").write[DateTime] and
     (JsPath \ "description").writeNullable[String] and
+    (JsPath \ "deleted").write[Boolean] and
+    (JsPath \ "infoLink").writeNullable[String] and
     JsPath.write[ChallengeGeneral] and
     JsPath.write[ChallengeCreation] and
     JsPath.write[ChallengePriority] and
@@ -49,16 +48,14 @@ trait ChallengeReads extends DefaultReads {
   implicit val challengePriorityReads: Reads[ChallengePriority] = Json.reads[ChallengePriority]
   implicit val challengeExtraReads: Reads[ChallengeExtra] = Json.reads[ChallengeExtra]
 
-  class jsonReads(key:String) extends Reads[String] {
-    override def reads(value:JsValue) : JsResult[String] = JsSuccess(value.toString())
-  }
-
   implicit val challengeReads: Reads[Challenge] = (
     (JsPath \ "id").read[Long] and
     (JsPath \ "name").read[String] and
     ((JsPath \ "created").read[DateTime] or Reads.pure(DateTime.now())) and
     ((JsPath \ "modified").read[DateTime] or Reads.pure(DateTime.now())) and
     (JsPath \ "description").readNullable[String] and
+    (JsPath \ "deleted").read[Boolean] and
+    (JsPath \ "infoLink").readNullable[String] and
     JsPath.read[ChallengeGeneral] and
     JsPath.read[ChallengeCreation] and
     JsPath.read[ChallengePriority] and

@@ -162,6 +162,113 @@
 					"response": []
 				},
 				{
+					"name": "Challenge Retrieved Deleted",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "d62e91a2-16b7-4de4-958b-0b9d45522434",
+								"type": "text/javascript",
+								"exec": [
+									"var jsonData = JSON.parse(responseBody);",
+									"tests[\"response code is 200\"] = responseCode.code === 200;",
+									"tests[\"name\"] = jsonData.name === \"SimpleChallenge\";",
+									"tests[\"deleted\"] = jsonData.deleted === true;"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "apiKey",
+								"value": "test"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "http://localhost:9000/api/v2/challenge/{{SimpleChallengeID}}",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9000",
+							"path": [
+								"api",
+								"v2",
+								"challenge",
+								"{{SimpleChallengeID}}"
+							]
+						},
+						"description": "Deletes the challenge for the provided ID"
+					},
+					"response": []
+				},
+				{
+					"name": "Challenge Immediate Deletion",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"var jsonData = JSON.parse(responseBody);",
+									"tests[\"response code is 200\"] = responseCode.code === 200;",
+									"tests[\"status\"] = jsonData.status === \"OK\";"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "apiKey",
+								"value": "test"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "http://localhost:9000/api/v2/challenge/{{SimpleChallengeID}}?immediate=true",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9000",
+							"path": [
+								"api",
+								"v2",
+								"challenge",
+								"{{SimpleChallengeID}}"
+							],
+							"query": [
+								{
+									"key": "immediate",
+									"value": "true",
+									"equals": true
+								}
+							]
+						},
+						"description": "Deletes the challenge for the provided ID"
+					},
+					"response": []
+				},
+				{
 					"name": "Challenge Tag Creation",
 					"event": [
 						{
@@ -313,6 +420,63 @@
 								"challenge",
 								"{{TagsChallengeID}}",
 								"tasks"
+							]
+						},
+						"description": "Gets the tasks of the challenge for the provided ID"
+					},
+					"response": []
+				},
+				{
+					"name": "Challenge Random Tasks",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "b4c85630-833a-4df4-b2d8-ad83f3ecb26e",
+								"type": "text/javascript",
+								"exec": [
+									"var jsonData = JSON.parse(responseBody);",
+									"tests[\"response code is 200\"] = responseCode.code === 200;",
+									"if (jsonData[0].name == \"Task 1\") {",
+									"    var id = pm.globals.get(\"TagsChallengeTask1ID\");    ",
+									"} else {",
+									"    var id = pm.globals.get(\"TagsChallengeTask2ID\");",
+									"}",
+									"tests[\"IDValidation\"] = jsonData[0].id == id;"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "apiKey",
+								"value": "test"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "http://localhost:9000/api/v2/challenge/{{TagsChallengeID}}/tasks/random",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9000",
+							"path": [
+								"api",
+								"v2",
+								"challenge",
+								"{{TagsChallengeID}}",
+								"tasks",
+								"random"
 							]
 						},
 						"description": "Gets the tasks of the challenge for the provided ID"
@@ -763,7 +927,7 @@
 							"raw": ""
 						},
 						"url": {
-							"raw": "http://localhost:9000/api/v2/challenge/{{TagsChallengeID}}",
+							"raw": "http://localhost:9000/api/v2/challenge/{{TagsChallengeID}}?immediate=true",
 							"protocol": "http",
 							"host": [
 								"localhost"
@@ -774,6 +938,13 @@
 								"v2",
 								"challenge",
 								"{{TagsChallengeID}}"
+							],
+							"query": [
+								{
+									"key": "immediate",
+									"value": "true",
+									"equals": true
+								}
 							]
 						},
 						"description": "Deletes the Tag challenge for the provided ID"
@@ -812,7 +983,7 @@
 							"raw": ""
 						},
 						"url": {
-							"raw": "http://localhost:9000/api/v2/project/{{SimpleProjectID}}",
+							"raw": "http://localhost:9000/api/v2/project/{{SimpleProjectID}}?immediate=true",
 							"protocol": "http",
 							"host": [
 								"localhost"
@@ -823,6 +994,13 @@
 								"v2",
 								"project",
 								"{{SimpleProjectID}}"
+							],
+							"query": [
+								{
+									"key": "immediate",
+									"value": "true",
+									"equals": true
+								}
 							]
 						},
 						"description": "Deletes the project that was used for the challenge tests."
@@ -841,10 +1019,11 @@
 						{
 							"listen": "test",
 							"script": {
+								"id": "061180ba-93d9-4165-8ea2-d5b5ce27f475",
 								"type": "text/javascript",
 								"exec": [
 									"var jsonData = JSON.parse(responseBody);",
-									"postman.setGlobalVariable(\"SimpleProjectID\", jsonData.id);",
+									"pm.globals.set(\"SimpleProjectID\", jsonData.id);",
 									"tests[\"response code is 201\"] = responseCode.code === 201;",
 									"tests[\"name\"] = jsonData.name === \"SimpleProject\";",
 									"tests[\"description\"] = jsonData.description === \"Test project containing all children used for api testing.\";"
@@ -891,10 +1070,11 @@
 						{
 							"listen": "test",
 							"script": {
+								"id": "31fa6818-074e-4220-b1fa-819310da0d7d",
 								"type": "text/javascript",
 								"exec": [
 									"var jsonData = JSON.parse(responseBody);",
-									"postman.setGlobalVariable(\"TagsChallengeID\", jsonData.id);",
+									"pm.globals.set(\"TagsChallengeID\", jsonData.id);",
 									"tests[\"response code is 201\"] = responseCode.code === 201;",
 									"tests[\"name\"] = jsonData.name === \"TagsChallenge\";",
 									"tests[\"description\"] = jsonData.description === \"A simple challenge containing only the basic elements for a challenge and two tags\";",
@@ -1046,11 +1226,11 @@
 						{
 							"listen": "test",
 							"script": {
-								"id": "52a22ad3-9739-4e09-9221-e5fea5718560",
+								"id": "debcb03c-61d4-41ac-b44c-c4c004a4ef17",
 								"type": "text/javascript",
 								"exec": [
 									"var jsonData = JSON.parse(responseBody);",
-									"postman.setGlobalVariable(\"VirtualChallengeID\", jsonData.id);",
+									"pm.globals.set(\"VirtualChallengeID\", jsonData.id);",
 									"tests[\"response code is 201\"] = responseCode.code === 201;",
 									"tests[\"name\"] = jsonData.name === \"test\";"
 								]
@@ -1071,7 +1251,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n\t\"name\":\"test\",\n\t\"searchParameters\":{\n\t\t\"challengeId\": {{TagsChallengeID}},\n\t\t\"location\": {\n\t\t\t\"left\":102,\n\t\t\t\"bottom\":0,\n\t\t\t\"right\":104,\n\t\t\t\"top\":2\n\t\t}\n\t}\n}"
+							"raw": "{\n\t\"name\":\"test\",\n\t\"searchParameters\":{\n\t\t\"challengeIds\": [ {{TagsChallengeID}} ],\n\t\t\"location\": {\n\t\t\t\"left\":102,\n\t\t\t\"bottom\":0,\n\t\t\t\"right\":104,\n\t\t\t\"top\":2\n\t\t}\n\t}\n}"
 						},
 						"url": {
 							"raw": "http://localhost:9000/api/v2/virtualchallenge",
@@ -1274,14 +1454,14 @@
 						{
 							"listen": "test",
 							"script": {
-								"id": "34912ad6-d31c-4bf9-8830-85ec811bf09b",
+								"id": "905e5406-7776-4bcf-a8cb-27617a05c142",
 								"type": "text/javascript",
 								"exec": [
 									"var jsonData = JSON.parse(responseBody);",
 									"tests[\"response code is 200\"] = responseCode.code === 200;",
 									"tests[\"size\"] = jsonData.length === 2;",
-									"postman.setGlobalVariable(\"VChallengeTask1ID\", jsonData[0].id);",
-									"postman.setGlobalVariable(\"VChallengeTask2ID\", jsonData[1].id);"
+									"pm.globals.set(\"VChallengeTask1ID\", jsonData[0].id);",
+									"pm.globals.set(\"VChallengeTask2ID\", jsonData[1].id);"
 								]
 							}
 						}
@@ -1363,14 +1543,12 @@
 						{
 							"listen": "test",
 							"script": {
-								"id": "ddbeaf5d-4f6b-49f7-aa23-1a1523ad2ecd",
+								"id": "ba4b7365-f1e5-4e96-805c-469fc29537eb",
 								"type": "text/javascript",
 								"exec": [
 									"var jsonData = JSON.parse(responseBody);",
 									"tests[\"response code is 200\"] = responseCode.code === 200;",
-									"tests[\"id\"] = jsonData.id === pm.variables.get(\"VChallengeTask2ID\");",
-									"",
-									""
+									"tests[\"id\"] = jsonData.id == pm.globals.get(\"VChallengeTask2ID\");"
 								]
 							}
 						}
@@ -1417,12 +1595,12 @@
 						{
 							"listen": "test",
 							"script": {
-								"id": "b604695f-ce62-444d-92fd-a14a4c068997",
+								"id": "8741daf9-46d3-4e42-aa20-f29ed39caa34",
 								"type": "text/javascript",
 								"exec": [
 									"var jsonData = JSON.parse(responseBody);",
 									"tests[\"response code is 200\"] = responseCode.code === 200;",
-									"tests[\"id\"] = jsonData.id === pm.variables.get(\"VChallengeTask1ID\");"
+									"tests[\"id\"] = jsonData.id == pm.globals.get(\"VChallengeTask1ID\");"
 								]
 							}
 						}
@@ -1598,11 +1776,11 @@
 						{
 							"listen": "test",
 							"script": {
-								"id": "52a22ad3-9739-4e09-9221-e5fea5718560",
+								"id": "66484512-de78-42a6-9a03-ab5d7049c9d7",
 								"type": "text/javascript",
 								"exec": [
 									"var jsonData = JSON.parse(responseBody);",
-									"postman.setGlobalVariable(\"VirtualChallengeID\", jsonData.id);",
+									"pm.globals.set(\"VirtualChallengeID\", jsonData.id);",
 									"tests[\"response code is 201\"] = responseCode.code === 201;",
 									"tests[\"name\"] = jsonData.name === \"test\";"
 								]
@@ -1623,7 +1801,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n\t\"name\":\"test\",\n\t\"searchParameters\":{\n\t\t\"location\": {\n\t\t\t\"left\":102,\n\t\t\t\"bottom\":0,\n\t\t\t\"right\":104,\n\t\t\t\"top\":2\n\t\t}\n\t},\n\t\"expiry\":\"1 s\"\n}"
+							"raw": "{\n\t\"name\":\"test\",\n\t\"searchParameters\":{\n\t\t\"challengeIds\": [ {{TagsChallengeID}} ],\n\t\t\"location\": {\n\t\t\t\"left\":102,\n\t\t\t\"bottom\":0,\n\t\t\t\"right\":104,\n\t\t\t\"top\":2\n\t\t}\n\t},\n\t\"expiry\":\"1 s\"\n}"
 						},
 						"url": {
 							"raw": "http://localhost:9000/api/v2/virtualchallenge",
@@ -1648,12 +1826,10 @@
 						{
 							"listen": "test",
 							"script": {
-								"id": "5e033501-5ba7-41b4-be01-a381af19764a",
+								"id": "9e2d657d-efa4-4dfc-800b-d094be10e9d6",
 								"type": "text/javascript",
 								"exec": [
-									"var jsonData = JSON.parse(responseBody);",
-									"tests[\"response code is 200\"] = responseCode.code === 200;",
-									"tests[\"name\"] = jsonData.name === \"test\";"
+									"tests[\"response code is 404\"] = responseCode.code === 404;"
 								]
 							}
 						}
@@ -1679,49 +1855,6 @@
 								"v2",
 								"virtualchallenge",
 								"11"
-							]
-						},
-						"description": ""
-					},
-					"response": []
-				},
-				{
-					"name": "Virtual Challenge Expiry Delete",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"id": "b40a12db-871d-437b-abc6-25d2b5b32ca7",
-								"type": "text/javascript",
-								"exec": [
-									"var jsonData = JSON.parse(responseBody);",
-									"tests[\"response code is 200\"] = responseCode.code === 200;",
-									"tests[\"status\"] = jsonData.status === \"OK\";"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "DELETE",
-						"header": [
-							{
-								"key": "apiKey",
-								"value": "test"
-							}
-						],
-						"body": {},
-						"url": {
-							"raw": "http://localhost:9000/api/v2/virtualchallenge/{{VirtualChallengeID}}",
-							"protocol": "http",
-							"host": [
-								"localhost"
-							],
-							"port": "9000",
-							"path": [
-								"api",
-								"v2",
-								"virtualchallenge",
-								"{{VirtualChallengeID}}"
 							]
 						},
 						"description": ""
@@ -1760,7 +1893,7 @@
 							"raw": ""
 						},
 						"url": {
-							"raw": "http://localhost:9000/api/v2/project/{{SimpleProjectID}}",
+							"raw": "http://localhost:9000/api/v2/project/{{SimpleProjectID}}?immediate=true",
 							"protocol": "http",
 							"host": [
 								"localhost"
@@ -1771,6 +1904,13 @@
 								"v2",
 								"project",
 								"{{SimpleProjectID}}"
+							],
+							"query": [
+								{
+									"key": "immediate",
+									"value": "true",
+									"equals": true
+								}
 							]
 						},
 						"description": "Deletes the project that was used for the challenge tests."
@@ -2487,7 +2627,7 @@
 							"raw": ""
 						},
 						"url": {
-							"raw": "http://localhost:9000/api/v2/project/{{SimpleProjectID}}",
+							"raw": "http://localhost:9000/api/v2/project/{{SimpleProjectID}}?immediate=true",
 							"protocol": "http",
 							"host": [
 								"localhost"
@@ -2498,6 +2638,13 @@
 								"v2",
 								"project",
 								"{{SimpleProjectID}}"
+							],
+							"query": [
+								{
+									"key": "immediate",
+									"value": "true",
+									"equals": true
+								}
 							]
 						},
 						"description": "Deletes the project created by the project creation. Would need to modify the supplied ID."
@@ -3411,7 +3558,111 @@
 		{
 			"name": "user",
 			"description": "",
-			"item": []
+			"item": [
+				{
+					"name": "Get Super User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "2740d979-7705-40db-a5af-a07618e427c0",
+								"type": "text/javascript",
+								"exec": [
+									"tests[\"response code is 200\"] = responseCode.code === 200;",
+									"var jsonData = JSON.parse(responseBody);",
+									"tests[\"id\"] = jsonData.id === -999;",
+									"tests[\"test1\"] = jsonData.properties.test1 === \"value1\";",
+									"tests[\"test2\"] = jsonData.properties.test2 === 8975;",
+									"tests[\"test3\"] = jsonData.properties.test3 === true;"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "apiKey",
+								"value": "test"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"properties\": {\n\t\t\"test1\":\"value1\",\n\t\t\"test2\":8975,\n\t\t\"test3\":true\n\t}\n}"
+						},
+						"url": {
+							"raw": "http://localhost:9000/api/v2/user/-999",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9000",
+							"path": [
+								"api",
+								"v2",
+								"user",
+								"-999"
+							]
+						},
+						"description": "Gets the super user that is automatically created with the system."
+					},
+					"response": []
+				},
+				{
+					"name": "Get OSM Super User ",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "a015f41e-3b14-4edf-a905-1af643a30a9e",
+								"type": "text/javascript",
+								"exec": [
+									"tests[\"response code is 200\"] = responseCode.code === 200;",
+									"var jsonData = JSON.parse(responseBody);",
+									"tests[\"id\"] = jsonData.id === -999;"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "apiKey",
+								"value": "test"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "http://localhost:9000/api/v2/osmuser/SuperUser",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9000",
+							"path": [
+								"api",
+								"v2",
+								"osmuser",
+								"SuperUser"
+							]
+						},
+						"description": "Gets the super user that is automatically created with the system by using the super user mocked OSM name."
+					},
+					"response": []
+				}
+			]
 		}
 	]
 }

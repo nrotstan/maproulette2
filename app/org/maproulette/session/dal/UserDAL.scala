@@ -22,7 +22,7 @@ import org.maproulette.exception.NotFoundException
 import org.maproulette.models.{Challenge, Project, Task}
 import org.maproulette.permissions.Permission
 import org.maproulette.utils.Utils
-import play.api.libs.json.{JsValue, Json}
+import play.api.libs.json.{JsString, JsValue, Json}
 import play.api.libs.oauth.RequestToken
 
 /**
@@ -71,10 +71,11 @@ class UserDAL @Inject() (override val db:Database,
       get[Option[String]]("users.custom_basemap_url") ~
       get[Option[Boolean]]("users.email_opt_in") ~
       get[Option[String]]("users.locale") ~
-      get[Option[Int]]("users.theme") map {
+      get[Option[Int]]("users.theme") ~
+      get[Option[String]]("properties") map {
       case id ~ osmId ~ created ~ modified ~ osmCreated ~ displayName ~ description ~ avatarURL ~
         homeLocation ~ apiKey ~ oauthToken ~ oauthSecret ~ defaultEditor ~ defaultBasemap ~
-        customBasemap ~ emailOptIn ~ locale ~ theme =>
+        customBasemap ~ emailOptIn ~ locale ~ theme ~ properties =>
         val locationWKT = homeLocation match {
           case Some(wkt) => new WKTReader().read(wkt).asInstanceOf[Point]
           case None => new GeometryFactory().createPoint(new Coordinate(0, 0))
@@ -86,7 +87,8 @@ class UserDAL @Inject() (override val db:Database,
             userGroupDAL.getUserGroups(osmId, User.superUser
           ),
           apiKey, false,
-          UserSettings(defaultEditor, defaultBasemap, customBasemap, locale, emailOptIn, theme)
+          UserSettings(defaultEditor, defaultBasemap, customBasemap, locale, emailOptIn, theme),
+          properties
         )
     }
   }
@@ -223,11 +225,12 @@ class UserDAL @Inject() (override val db:Database,
 
       val query = s"""WITH upsert AS (UPDATE users SET osm_id = {osmID}, osm_created = {osmCreated},
                               name = {name}, description = {description}, avatar_url = {avatarURL},
-                              oauth_token = {token}, oauth_secret = {secret},  home_location = ST_GeomFromEWKT({wkt})
+                              oauth_token = {token}, oauth_secret = {secret},  home_location = ST_GeomFromEWKT({wkt}),
+                              properties = {properties}
                             WHERE id = {id} OR osm_id = {osmID} RETURNING ${this.retrieveColumns})
             INSERT INTO users (api_key, osm_id, osm_created, name, description,
-                               avatar_url, oauth_token, oauth_secret, home_location)
-            SELECT {apiKey}, {osmID}, {osmCreated}, {name}, {description}, {avatarURL}, {token}, {secret}, ST_GeomFromEWKT({wkt})
+                               avatar_url, oauth_token, oauth_secret, home_location, properties)
+            SELECT {apiKey}, {osmID}, {osmCreated}, {name}, {description}, {avatarURL}, {token}, {secret}, ST_GeomFromEWKT({wkt}), {properties}
             WHERE NOT EXISTS (SELECT * FROM upsert)"""
       SQL(query).on(
         'apiKey -> newAPIKey,
@@ -239,7 +242,8 @@ class UserDAL @Inject() (override val db:Database,
         'token -> item.osmProfile.requestToken.token,
         'secret -> item.osmProfile.requestToken.secret,
         'wkt -> s"SRID=4326;$ewkt",
-        'id -> item.id
+        'id -> item.id,
+        'properties -> item.properties
       ).executeUpdate()
     }
     // just in case expire the osm ID
@@ -270,14 +274,19 @@ class UserDAL @Inject() (override val db:Database,
     * be updated separately
     *
     * @param settings The user settings that have been pulled from the request object
+    * @param properties Any extra properties that a client wishes to store alongside the user object
     * @param user The user making the update request
     * @param id The id of the user being updated
     * @param c an optional connection, if not provided a new connection from the pool will be retrieved
     * @return An optional user, if user with supplied ID not found, then will return empty optional
     */
-  def managedUpdate(settings:UserSettings, user:User)(implicit id:Long, c:Option[Connection]=None) : Option[User] = {
+  def managedUpdate(settings:UserSettings, properties:Option[JsValue], user:User)(implicit id:Long, c:Option[Connection]=None) : Option[User] = {
     implicit val settingsWrite = User.settingsWrites
-    this.update(Utils.insertIntoJson(Json.parse("{}"), "settings", Json.toJson(settings)), user)
+    val updateBody = Utils.insertIntoJson(Json.parse("{}"), "settings", Json.toJson(settings))
+    this.update(properties match {
+      case Some(p) => Utils.insertIntoJson(updateBody, "properties", JsString(p.toString()))
+      case None => updateBody
+    }, user)
   }
 
   /**
@@ -311,6 +320,7 @@ class UserDAL @Inject() (override val db:Database,
         val locale = (value \ "settings" \ "locale").asOpt[String].getOrElse(cachedItem.settings.locale.getOrElse("en"))
         val emailOptIn = (value \ "settings" \ "emailOptIn").asOpt[Boolean].getOrElse(cachedItem.settings.emailOptIn.getOrElse(false))
         val theme = (value \ "settings" \ "theme").asOpt[Int].getOrElse(cachedItem.settings.theme.getOrElse(-1))
+        val properties = (value \ "properties").asOpt[String].getOrElse(cachedItem.properties.getOrElse("{}"))
 
         this.updateGroups(value, user)
         this.userGroupDAL.clearUserCache(cachedItem.osmProfile.id)
@@ -319,7 +329,7 @@ class UserDAL @Inject() (override val db:Database,
                                           avatar_url = {avatarURL}, oauth_token = {token}, oauth_secret = {secret},
                                           home_location = ST_SetSRID(ST_GeomFromEWKT({wkt}),4326), default_editor = {defaultEditor},
                                           default_basemap = {defaultBasemap}, custom_basemap_url = {customBasemap},
-                                          locale = {locale}, email_opt_in = {emailOptIn}, theme = {theme}
+                                          locale = {locale}, email_opt_in = {emailOptIn}, theme = {theme}, properties = {properties}
                         WHERE id = {id} RETURNING ${this.retrieveColumns}"""
         SQL(query).on(
           'apiKey -> apiKey,
@@ -335,7 +345,8 @@ class UserDAL @Inject() (override val db:Database,
           'customBasemap -> customBasemap,
           'locale -> locale,
           'emailOptIn -> emailOptIn,
-          'theme -> theme
+          'theme -> theme,
+          'properties -> properties
         ).as(this.parser.*).headOption
       }
     }
@@ -370,7 +381,7 @@ class UserDAL @Inject() (override val db:Database,
     * @param id The user to delete
     * @return The rows that were deleted
     */
-  override def delete(id: Long, user:User)(implicit c:Option[Connection]=None) : User = {
+  override def delete(id: Long, user:User, immediate:Boolean=false)(implicit c:Option[Connection]=None) : User = {
     this.permission.hasSuperAccess(user)
     retrieveById(id) match {
       case Some(u) => userGroupDAL.clearUserCache(u.osmProfile.id)

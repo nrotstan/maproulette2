@@ -175,10 +175,10 @@ var Utils = {
  */
 function SearchParameters() {
     var defaultState = {
-        projectId: -1,
+        projectIds: [],
         projectSearch: '',
         projectEnabled: true,
-        challengeId: -1,
+        challengeIds: [],
         challengeEnabled: true,
         challengeSearch: '',
         challengeTags: [],
@@ -228,10 +228,10 @@ function SearchParameters() {
         if (resetCookie) {
             _reset();
         }
-        setValueByQS("pid", "projectId", parseInt);
+        setValueByQS("pid", "projectIds", parseInt);
         setValueByQS("ps", "projectSearch");
         setValueByQS("pe", "projectEnabled", Boolean);
-        setValueByQS("cid", "challengeId", parseInt);
+        setValueByQS("cid", "challengeIds", parseInt);
         setValueByQS("ct", "challengeTags", function(v) { return v.split(","); });
         setValueByQS("ctc", "challengeTagConjunction", Boolean);
         setValueByQS("cs", "challengeSearch");
@@ -257,10 +257,10 @@ function SearchParameters() {
     };
 
     this.getProjectId = function() {
-        return getValue("projectId");
+        return getValue("projectIds");
     };
     this.setProjectId = function(id) {
-        setValue("projectId", id);
+        setValue("projectIds", id);
     };
     this.getProjectSearch = function() {
         return getValue("projectSearch");
@@ -275,10 +275,10 @@ function SearchParameters() {
         setValue("projectEnabled", enabled);
     };
     this.getChallengeId = function() {
-        return getValue("challengeId");
+        return getValue("challengeIds");
     };
     this.setChallengeId = function(id) {
-        setValue("challengeId", id);
+        setValue("challengeIds", id);
     };
     this.getChallengeTags = function() {
         return getValue("challengeTags");

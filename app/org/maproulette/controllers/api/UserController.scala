@@ -6,15 +6,19 @@ import org.maproulette.exception.{NotFoundException, StatusMessage}
 import org.maproulette.models.{Challenge, Task}
 import org.maproulette.session.dal.UserDAL
 import org.maproulette.session.{SessionManager, User, UserSettings}
-import play.api.libs.json.{DefaultWrites, JsString, JsValue, Json}
-import play.api.mvc.{Action, AnyContent, BodyParsers, Controller}
+import play.api.libs.json._
+import play.api.mvc._
+
+import scala.concurrent.Promise
+import scala.util.{Failure, Success}
 
 /**
   * @author cuthbertm
   */
 class UserController @Inject()(userDAL: UserDAL, sessionManager: SessionManager) extends Controller with DefaultWrites {
+  import scala.concurrent.ExecutionContext.Implicits.global
 
-  implicit val userWrites = User.userWrites
+  implicit val userReadWrite = User.UserFormat
   implicit val challengeWrites = Challenge.writes.challengeWrites
   implicit val taskWrites = Task.TaskFormat
 
@@ -59,10 +63,30 @@ class UserController @Inject()(userDAL: UserDAL, sessionManager: SessionManager)
         case None => //just ignore, we don't have to do anything if it isn't there
       }
       implicit val settingsRead = User.settingsReads
-      userDAL.managedUpdate(request.body.as[UserSettings], user)(id) match {
+      userDAL.managedUpdate(request.body.as[UserSettings], (request.body \ "properties").toOption, user)(id) match {
         case Some(u) => Ok(Json.toJson(u))
         case None => throw new NotFoundException(s"No user found to update with id '$id'")
       }
+    }
+  }
+
+  /**
+    * Action to refresh the user's OSM profile
+    *
+    * @return Ok Status with no content
+    */
+  def refreshProfile(osmUserId:Long) : Action[AnyContent] = Action.async { implicit request =>
+    sessionManager.authenticatedFutureRequest { implicit user =>
+      val p = Promise[Result]
+      this.userDAL.retrieveByOSMID(osmUserId, user) match {
+        case Some(u) =>
+          sessionManager.refreshProfile(u.osmProfile.requestToken, user) onComplete {
+            case Success(result) => p success Ok
+            case Failure(f) => p failure f
+          }
+        case None => p failure new NotFoundException(s"Failed to find any user with OSM User id [$osmUserId]")
+      }
+      p.future
     }
   }
 

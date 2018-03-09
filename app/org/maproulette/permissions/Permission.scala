@@ -78,12 +78,18 @@ class Permission @Inject() (dalManager: Provider[DALManager]) {
           if (obj.asInstanceOf[Challenge].general.owner != user.osmProfile.id) {
             hasProjectAccess(dalManager.get().challenge.retrieveRootObject(Right(obj.asInstanceOf[Challenge]), user), user)
           }
+        case VirtualChallengeType() =>
+          if (obj.asInstanceOf[VirtualChallenge].ownerId != user.osmProfile.id) {
+            throw new IllegalAccessException(s"Only super users or the owner of the Virtual Challenge can write to it.")
+          }
         case TaskType() =>
           hasProjectAccess(dalManager.get().task.retrieveRootObject(Right(obj.asInstanceOf[Task]), user), user)
         case TagType() =>
         case GroupType() =>
           // Currently only super users have access to group objects
           throw new IllegalAccessException(s"Only super users have access to group objects")
+        case _ =>
+          throw new IllegalAccessException(s"Unknown object type ${obj.itemType.toString}")
       }
     }
   }
@@ -117,6 +123,7 @@ class Permission @Inject() (dalManager: Provider[DALManager]) {
     }
   }
 
+  // TODO this function needs to take into account user groups
   private def hasProjectAccess(project:Option[Project], user:User) : Unit = {
     if (!user.isSuperUser) {
       project match {

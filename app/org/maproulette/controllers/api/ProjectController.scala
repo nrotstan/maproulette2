@@ -53,6 +53,7 @@ class ProjectController @Inject() (override val childController:ChallengeControl
     var jsonBody = super.updateCreateBody(body, user)
     jsonBody = Utils.insertIntoJson(jsonBody, "groups", Array.emptyShortArray)(arrayWrites[Short])
     jsonBody = Utils.insertIntoJson(jsonBody, "owner", user.osmProfile.id, true)(LongWrites)
+    jsonBody = Utils.insertIntoJson(jsonBody, "deleted", false)(BooleanWrites)
     Utils.insertIntoJson(jsonBody, "enabled", true)(BooleanWrites)
   }
 
@@ -93,7 +94,7 @@ class ProjectController @Inject() (override val childController:ChallengeControl
                      tags: String, taskSearch:String, limit:Int, proximityId:Long) : Action[AnyContent] = Action.async { implicit request =>
     this.sessionManager.userAwareRequest { implicit user =>
       val params = SearchParameters(
-        projectId = Some(projectId),
+        projectIds = Some(List(projectId)),
         challengeSearch = Some(challengeSearch),
         challengeTags = Some(Utils.split(challengeTags)),
         taskSearch = Some(taskSearch),

@@ -145,9 +145,10 @@ trait BaseDAL[Key, T<:BaseObject[Key]] extends DALHelper with TransactionManager
     *
     * @param id The id that you want to delete
     * @param user The user executing the task
+    * @param immediate Ignored for the base function, only used by the ParentDAL which override it and uses it
     * @return Count of deleted row(s)
     */
-  def delete(id: Key, user:User)(implicit c:Option[Connection]=None): T = {
+  def delete(id: Key, user:User, immediate:Boolean=false)(implicit c:Option[Connection]=None): T = {
     implicit val key = id
     val deletedItem = this.cacheManager.withDeletingCache(Long => retrieveById) { implicit deletedItem =>
       this.permission.hasObjectWriteAccess(deletedItem.asInstanceOf[BaseObject[Long]], user)
@@ -211,7 +212,7 @@ trait BaseDAL[Key, T<:BaseObject[Key]] extends DALHelper with TransactionManager
     this.cacheManager.withOptionCaching { () =>
       this.withMRConnection { implicit c =>
         val query = s"SELECT ${this.retrieveColumns} FROM ${this.tableName} WHERE name = {name} ${this.parentFilter(parentId)}"
-        SQL(query).on('name -> name).as(this.parser.singleOpt)
+        SQL(query).on('name -> name).as(this.parser.*).headOption
       }
     }
   }

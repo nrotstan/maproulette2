@@ -198,13 +198,42 @@ GET     /projectByName/:name                        @org.maproulette.controllers
 #   - name: id
 #     in: path
 #     description: The id of the project being deleted
+#   - name: immediate
+#     in: query
+#     description: If set to true, will delete the virtual challenge immediately instead of delayed
+#     default: false
+#     type: boolean
 #   - name: apiKey
 #     in: header
 #     description: The user's apiKey to authorize the request
 #     required: true
 #     type: string
 ###
-DELETE  /project/:id                                @org.maproulette.controllers.api.ProjectController.delete(id:Long)
+DELETE  /project/:id                                @org.maproulette.controllers.api.ProjectController.delete(id:Long, immediate:Boolean ?= false)
+###
+# tags: [ Project ]
+# summary: Undeletes a Project
+# description: If a Project has been setup for deletion and not removed from the database we can undelete it and make it so that it does not get deleted anymore. During the undelete of this project, and challenges that were scheduled for deletion will also be undeleted
+# responses:
+#   '200':
+#     description: The Project that was undeleted.
+#     schema:
+#       $ref: '#/definitions/org.maproulette.models.Project'
+#   '401':
+#     description: The user is not authorized to make this request
+#   '404':
+#     description: No Project found matching the provided id
+# parameters:
+#   - name: id
+#     in: path
+#     description: The id of the Project being deleted
+#   - name: apiKey
+#     in: header
+#     description: The user's apiKey to authorize the request
+#     required: true
+#     type: string
+###
+PUT  /project/:id/undelete                         @org.maproulette.controllers.api.ProjectController.undelete(id:Long)
 ###
 # tags: [ Project ]
 # summary: Find project matching search criteria
@@ -678,13 +707,42 @@ GET     /project/:id/challenge/:name                @org.maproulette.controllers
 #   - name: id
 #     in: path
 #     description: The id of the Challenge being deleted
+#   - name: immediate
+#     in: query
+#     description: If set to true, will delete the virtual challenge immediately instead of delayed
+#     default: false
+#     type: boolean
 #   - name: apiKey
 #     in: header
 #     description: The user's apiKey to authorize the request
 #     required: true
 #     type: string
 ###
-DELETE  /challenge/:id                              @org.maproulette.controllers.api.ChallengeController.delete(id:Long)
+DELETE  /challenge/:id                              @org.maproulette.controllers.api.ChallengeController.delete(id:Long, immediate:Boolean ?= false)
+###
+# tags: [ Challenge ]
+# summary: Undeletes a Challenge
+# description: If a Challenge has been setup for deletion and not removed from the database we can undelete it and make it so that it does not get deleted anymore.
+# responses:
+#   '200':
+#     description: The Challenge that was undeleted.
+#     schema:
+#       $ref: '#/definitions/org.maproulette.models.Challenge'
+#   '401':
+#     description: The user is not authorized to make this request
+#   '404':
+#     description: No Challenge found matching the provided id
+# parameters:
+#   - name: id
+#     in: path
+#     description: The id of the Project being deleted
+#   - name: apiKey
+#     in: header
+#     description: The user's apiKey to authorize the request
+#     required: true
+#     type: string
+###
+PUT  /challenge/:id/undelete                         @org.maproulette.controllers.api.ChallengeController.undelete(id:Long)
 ###
 # tags: [ Challenge ]
 # summary: Deletes all Challenge Tasks
@@ -1006,6 +1064,57 @@ PUT     /challenge/:id/tasks                        @org.maproulette.controllers
 GET     /challenge/:id/children                     @org.maproulette.controllers.api.ChallengeController.expandedList(id:Long, limit:Int ?= 10, page:Int ?= 0)
 ###
 # tags: [ Challenge ]
+# summary: Clones a Challenge
+# produces: [ application/json ]
+# description: Clones a challenge
+# responses:
+#   '200':
+#     description: The newly created cloned challenge
+#     schema:
+#       $ref: '#/definitions/org.maproulette.models.Challenge'
+#   '401':
+#     description: The user is not authorized to make this request\
+#   '404':
+#     description: No Challenge found matching the provided id
+# parameters:
+#   - name: id
+#     in: path
+#     description: The id of the Challenge to clone.
+#   - name: name
+#     in: path
+#     description: The name of the new challenge
+#   - name: apiKey
+#     in: header
+#     description: The user's apiKey to authorize the request
+#     required: true
+#     type: string
+###
+PUT     /challenge/:id/clone/:name                  @org.maproulette.controllers.api.ChallengeController.cloneChallenge(id:Long, name:String)
+###
+# tags: [ Challenge ]
+# summary: Rebuild a Challenge
+# produces: [ application/json ]
+# description: Rebuilds a challenge that was originally built by an overpass query or remote geojson.
+# responses:
+#   '200':
+#     description: Empty OK status
+#   '401':
+#     description: The user is not authorized to make this request
+#   '404':
+#     description: No Challenge found matching the provided id
+# parameters:
+#   - name: id
+#     in: path
+#     description: The id of the Challenge to rebuild.
+#   - name: apiKey
+#     in: header
+#     description: The user's apiKey to authorize the request
+#     required: true
+#     type: string
+###
+PUT     /challenge/:id/rebuild                      @org.maproulette.controllers.api.ChallengeController.rebuildChallenge(id:Long)
+###
+# tags: [ Challenge ]
 # summary: Retrieves random Task
 # produces: [ application/json ]
 # description: Retrieves a random Task based on the search criteria and contained within the current Challenge
@@ -1143,7 +1252,7 @@ GET     /challenge/view/:id                         @org.maproulette.controllers
 #     in: query
 #     description: Can filter the Tasks returned by the status of the Task. 0 - Created, 1 - Fixed, 2 - False Positive, 3 - Skipped, 4 - Deleted, 5 - Already Fixed, 6 - Too Hard
 ###
-GET     /challenge/clustered/:id                    @org.maproulette.controllers.api.ChallengeController.getClusteredPoints(id:Long, filter:String ?= "")
+GET     /challenge/clustered/:id                    @org.maproulette.controllers.api.ChallengeController.getClusteredPoints(id:Long, filter:String ?= "", limit:Int ?= 2500)
 ###
 # tags: [ Challenge ]
 # summary: Update Task Priorities
@@ -1237,6 +1346,78 @@ GET     /challenge/:id/comments                     @org.maproulette.controllers
 #     description: Used in conjunction with the limit parameter to page through X number of responses. Default value is 0, ie. first page.
 ###
 GET     /challenge/:id/comments/extract             @org.maproulette.controllers.api.ChallengeController.extractComments(id:Long, limit:Int ?= -1, page:Int ?= 0)
+###
+# tags: [ Challenge ]
+# summary: Match OSM Changesets
+# description: This will go through every task and try to match an OSM changeset with the task
+# response:
+#   '200':
+#     description: Will always return Ok unless not authenticated
+#   '401':
+#     description: The user is not authorized to make this request
+#   '404':
+#     description: No Challenge with provided ID found
+# parameters:
+#   - name: id
+#     in: path
+#     description: The ID of the challenge
+#     required: true
+#   - name: skipSet
+#     in: query
+#     description: Will skip any tasks if the changesets are already set if this is set to true
+#     default: false
+###
+GET     /challenge/:id/matchChangesets          @org.maproulette.controllers.api.ChallengeController.matchChangeSets(id:Long, skipSet:Boolean ?= false)
+###
+# tags: [ Challenge ]
+# summary: Create Challenge from Github
+# description: This will pull the following files from Github, ${name}_create.json, ${name}_geojson.json, ${name}_info.md, and create a Challenge from it. The create file will be the json used to create the challenge. Similarly to if you supplied json in the create method. The info.md file is just an informational file that can be used later for challenge information to the user. And geojson.json which is used to generate the tasks. If the challenge has been previously created, it will just update the tasks from the geojson
+# response:
+#   '200':
+#     description: The retrieved Challenge
+#     schema:
+#       $ref: '#/definitions/org.maproulette.models.Challenge'
+#   '401':
+#     description: The user is not authorized to make this request
+#   '404':
+#     description: No Project with provided ID found
+# parameters:
+#   - name: id
+#     in: path
+#     description: The ID of the parent project
+#     required: true
+#   - name: username
+#     in: path
+#     description: username of the github user that owns the repo
+#     required: true
+#   - name: repo
+#     in: path
+#     description: Github repositories that contains the challenge files
+#     required: true
+#   - name: name
+#     in: path
+#     description: The name of the challenge that prefixes all the github files
+#     required: true
+###
+POST     /project/:projectId/challenge/:username/:repo/:name   @org.maproulette.controllers.api.ChallengeController.createFromGithub(projectId:Long, username:String, repo:String, name:String, rebuild:Boolean ?= false)
+###
+# tags: [ Challenge ]
+# summary: Extracts a Challenge Package
+# description: This will retrieve a package of the challenge, which will contain json to recreate the challenge, geojson to recreate the tasks, info page in md format if any, all the comments extracted from for the challenge and any metrics and the time the challenge was extracted.
+# response:
+#   '200':
+#     description: A gzipped file containing a package of the challenge
+#   '401':
+#     description: The user is not authorized to make this request
+#   '404':
+#     description: No project with provided ID found
+# parameters:
+#   - name: id
+#     in: path
+#     description: The ID of the challenge
+#     required: true
+###
+GET     /challenge/:id/extract                      @org.maproulette.controllers.api.ChallengeController.extractPackage(id:Long)
 ###
 # tags: [ Virtual Challenge ]
 # summary: Create a Virtual Challenge
@@ -1359,13 +1540,18 @@ GET     /virtualchallengebyname/:name                   @org.maproulette.control
 #   - name: id
 #     in: path
 #     description: The id of the Virtual Challenge being deleted
+#   - name: immediate
+#     in: query
+#     description: If set to true, will delete the virtual challenge immediately instead of delayed
+#     default: false
+#     type: boolean
 #   - name: apiKey
 #     in: header
 #     description: The user's apiKey to authorize the request
 #     required: true
 #     type: string
 ###
-DELETE  /virtualchallenge/:id                           @org.maproulette.controllers.api.VirtualChallengeController.delete(id:Long)
+DELETE  /virtualchallenge/:id                           @org.maproulette.controllers.api.VirtualChallengeController.delete(id:Long, immediate:Boolean ?= true)
 ###
 # tags: [ Virtual Challenge ]
 # summary: List all the Virtual Challenge.
@@ -1903,7 +2089,7 @@ GET     /challenge/:id/task/:name                   @org.maproulette.controllers
 #     required: true
 #     type: string
 ###
-DELETE  /task/:id                                   @org.maproulette.controllers.api.TaskController.delete(id:Long)
+DELETE  /task/:id                                   @org.maproulette.controllers.api.TaskController.delete(id:Long, immediate:Boolean ?= true)
 ###
 # tags: [ Task ]
 # summary: Find Task matching search criteria
@@ -2068,6 +2254,31 @@ GET     /tasks/random                               @org.maproulette.controllers
 #     description: Used in conjunction with the limit parameter to page through X number of responses. Default value is 0, ie. first page.
 ###
 GET     /tasks/box/:left/:bottom/:right/:top        @org.maproulette.controllers.api.TaskController.getTasksInBoundingBox(left:Double, bottom:Double, right:Double, top:Double, limit:Int ?= 10000, page:Int ?= 0)
+###
+# tags: [ Task ]
+# summary: Update Task Changeset
+# produces: [ application/json ]
+# description: Will update the changeset of the task. It will do this by attempting to match the OSM changeset to the Task based on the geometry and the time that the changeset was executed.
+# responses:
+#   '200':
+#     description: The task that was updated. With the updated changeset value
+#     schema:
+#       $ref: '#/definitions/org.maproulette.models.Task'
+#   '401':
+#     description: The user is not authorized to make this request
+#   '404':
+#     description: The task with the supplied ID was not found.
+# parameters:
+#   - name: apiKey
+#     in: header
+#     description: The user's apiKey to authorize the request
+#     required: true
+#     type: string
+#   - name: id
+#     in: path
+#     description: The ID of the task
+###
+PUT     /task/:id/changeset                         @org.maproulette.controllers.api.TaskController.matchToOSMChangeSet(id:Long)
 ###
 # tags: [ Task ]
 # summary: Update Task Status
@@ -2388,11 +2599,11 @@ GET     /tag/:id                                    @org.maproulette.controllers
 #     required: true
 #     type: string
 ###
-DELETE  /keyword/:id                                @org.maproulette.controllers.api.TagController.delete(id:Long)
+DELETE  /keyword/:id                                @org.maproulette.controllers.api.TagController.delete(id:Long, immediate:Boolean ?= true)
 ###
 # tags: [ Tag (Deprecated) ]
 ###
-DELETE  /tag/:id                                    @org.maproulette.controllers.api.TagController.delete(id:Long)
+DELETE  /tag/:id                                    @org.maproulette.controllers.api.TagController.delete(id:Long, immediate:Boolean ?= true)
 ###
 # tags: [ Keyword ]
 # summary: Finds Keywords
@@ -2671,6 +2882,19 @@ DELETE   /user/:userId/unsaveTask/:taskId           @org.maproulette.controllers
 #       $ref: '#/definitions/org.maproulette.session.UserSettings'
 ###
 PUT    /user/:userId                                @org.maproulette.controllers.api.UserController.updateUser(userId:Long)
+###
+# tags: [ User ]
+# summary: Refresh User Profile
+# description: Refreshes the user profile from OSM
+# responses:
+#   '200':
+#     description: Ok with no content
+# parameters:
+#   - name: userId
+#     in: path
+#     description: The osm id of the user to update the settings for
+###
+PUT    /user/:userId/refresh                        @org.maproulette.controllers.api.UserController.refreshProfile(userId:Long)
 ### NoDocs ###
 POST    /*path                                      @org.maproulette.controllers.api.APIController.invalidAPIPath(path)
 ### NoDocs ###

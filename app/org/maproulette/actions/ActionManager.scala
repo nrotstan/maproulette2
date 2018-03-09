@@ -28,6 +28,8 @@ case class ActionItem(id:Long=(-1),
                       created:Option[DateTime]=None,
                       osmUserId:Option[Long]=None,
                       typeId:Option[Int]=None,
+                      parentId:Option[Long]=None,
+                      parentName:Option[String]=None,
                       itemId:Option[Long]=None,
                       action:Option[Int]=None,
                       status:Option[Int]=None,
@@ -74,7 +76,8 @@ class ActionManager @Inject()(config: Config, db:Database)(implicit application:
   implicit val actionItemReads: Reads[ActionItem] = Json.reads[ActionItem]
 
   /**
-    * A anorm row parser for the actions table
+    * Special row parser that gets the parent information of the action item as well.
+    *
     */
   implicit val parser: RowParser[ActionItem] = {
       get[Long]("actions.id") ~
@@ -84,9 +87,29 @@ class ActionManager @Inject()(config: Config, db:Database)(implicit application:
       get[Option[Long]]("actions.item_id") ~
       get[Option[Int]]("actions.action") ~
       get[Option[Int]]("actions.status") ~
+      get[Option[String]]("actions.extra") ~
+      get[Option[Long]]("parent_id") ~
+      get[Option[String]]("parent_name") map {
+      case id ~ created ~ osmUserId ~ typeId ~ itemId ~ action ~ status ~ extra ~ parentId ~ parentName => {
+        new ActionItem(id, created, osmUserId, typeId, parentId, parentName, itemId, action, status, extra)
+      }
+    }
+  }
+
+  /**
+    * A anorm row parser for the actions table
+    */
+  implicit val baseParser: RowParser[ActionItem] = {
+    get[Long]("actions.id") ~
+      get[Option[DateTime]]("created") ~
+      get[Option[Long]]("actions.osm_user_id") ~
+      get[Option[Int]]("actions.type_id") ~
+      get[Option[Long]]("actions.item_id") ~
+      get[Option[Int]]("actions.action") ~
+      get[Option[Int]]("actions.status") ~
       get[Option[String]]("actions.extra") map {
       case id ~ created ~ osmUserId ~ typeId ~ itemId ~ action ~ status ~ extra => {
-        new ActionItem(id, created, osmUserId, typeId, itemId, action, status, extra)
+        new ActionItem(id = id, created = created, osmUserId = osmUserId, typeId = typeId, itemId = itemId, action = action, status = status, extra = extra)
       }
     }
   }
@@ -123,7 +146,7 @@ class ActionManager @Inject()(config: Config, db:Database)(implicit application:
           'actionId -> action.getId,
           'statusId -> statusId,
           'extra -> extra
-        ).as(parser.*).headOption
+        ).as(baseParser.*).headOption
       }
     }
   }
@@ -186,10 +209,22 @@ class ActionManager @Inject()(config: Config, db:Database)(implicit application:
     }
 
     val query =
-      s"""SELECT * FROM actions
-         | ${if (whereClause.nonEmpty) { s"WHERE ${whereClause.toString}" }}
-         |ORDER BY CREATED DESC
-         |LIMIT ${sqlLimit(limit)} OFFSET $offset""".stripMargin
+      s"""
+         |SELECT *, a[1]::Int AS parent_id, a[2] AS parent_name FROM (
+         |  SELECT *,
+         |    CASE type_id
+         |      WHEN 1 | 4 THEN (SELECT REGEXP_SPLIT_TO_ARRAY(c.parent_id || ',' || p.name, ',') FROM challenges c
+         |                        INNER JOIN projects p ON p.id = c.parent_id WHERE c.id = item_id)
+         |      WHEN 2 THEN (SELECT REGEXP_SPLIT_TO_ARRAY(t.parent_id || ',' || c.name, ',') FROM tasks t
+         |                        INNER JOIN challenges c ON c.id = t.parent_id WHERE t.id = item_id)
+         |      ELSE NULL
+         |    END AS a
+         |  FROM actions
+         |  ${if (whereClause.nonEmpty) { s"WHERE ${whereClause.toString}" }}
+         |  ORDER BY CREATED DESC
+         |  LIMIT ${sqlLimit(limit)} OFFSET $offset
+         |) AS core
+       """.stripMargin
     db.withConnection { implicit c =>
       sqlWithParameters(query, parameters).as(parser.*)
     }

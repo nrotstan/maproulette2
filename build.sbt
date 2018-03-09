@@ -40,6 +40,7 @@ libraryDependencies ++= Seq(
   "net.postgis" % "postgis-jdbc" % "2.2.0",
   "joda-time" % "joda-time" % "2.9.2",
   "com.vividsolutions" % "jts" % "1.13",
+  "org.wololo" % "jts2geojson" % "0.10.0",
   "org.julienrf" %% "play-jsmessages" % "2.0.0",
   "org.webjars" %% "webjars-play" % "2.5.0-4",
   "org.webjars" % "bootstrap" % "3.3.6",

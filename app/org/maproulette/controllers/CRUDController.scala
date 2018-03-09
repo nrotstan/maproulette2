@@ -15,7 +15,7 @@ import org.maproulette.session.{SessionManager, User}
 import org.maproulette.utils.Utils
 import play.api.Logger
 import play.api.libs.json._
-import play.api.mvc.{Action, AnyContent, BodyParsers, Controller}
+import play.api.mvc._
 
 /**
   * This is the base controller class that handles all the CRUD operations for the objects in MapRoulette.
@@ -45,7 +45,7 @@ trait CRUDController[T<:BaseObject[Long]] extends Controller with DefaultWrites 
     * @param obj the object being sent in the response
     * @return A Json representation of the object
     */
-  def inject(obj:T) : JsValue = Json.toJson(obj)
+  def inject(obj:T)(implicit request:Request[Any]) : JsValue = Json.toJson(obj)
 
   /**
     * Function can be implemented to extract more information than just the default create data,
@@ -239,14 +239,19 @@ trait CRUDController[T<:BaseObject[Long]] extends Controller with DefaultWrites 
     * Must be authenticated to perform operation
     *
     * @param id The id of the object to delete
+    * @param immediate if true will delete it immediately, otherwise will just flag for deletion
     * @return 204 NoContent
     */
-  def delete(id:Long) : Action[AnyContent] = Action.async { implicit request =>
+  def delete(id:Long, immediate:Boolean) : Action[AnyContent] = Action.async { implicit request =>
     this.sessionManager.authenticatedRequest { implicit user =>
-      this.dal.delete(id.toLong, user)
+      this.dal.delete(id.toLong, user, immediate)
       this.actionManager.setAction(Some(user), this.itemType.convertToItem(id.toLong), Deleted(), "")
-      Ok(Json.toJson(StatusMessage("OK",
-        JsString(s"${Actions.getTypeName(this.itemType.typeId).getOrElse("Unknown Object")} $id deleted by user ${user.id}."))))
+      val message = if (immediate) {
+        JsString(s"${Actions.getTypeName(this.itemType.typeId).getOrElse("Unknown Object")} $id deleted by user ${user.id}.")
+      } else {
+        JsString(s"${Actions.getTypeName(this.itemType.typeId).getOrElse("Unknown Object")} $id set for delayed deletion by user ${user.id}.")
+      }
+      Ok(Json.toJson(StatusMessage("OK", message)))
     }
   }
 

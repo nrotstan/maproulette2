@@ -4,7 +4,7 @@ package org.maproulette.controllers
 
 import java.sql.Connection
 
-import org.maproulette.exception.StatusMessage
+import org.maproulette.exception.{NotFoundException, StatusMessage}
 import org.maproulette.models.BaseObject
 import org.maproulette.models.dal.ParentDAL
 import org.maproulette.session.User
@@ -33,13 +33,16 @@ trait ParentController[T<:BaseObject[Long], C<:BaseObject[Long]] extends CRUDCon
   // writes function for the child object to json
   protected val cWrites:Writes[C]
 
-  /**
-    * Injects anything classes that override this function want too.
-    *
-    * @param obj The object to inject the new values into
-    * @return A json representation of the object
-    */
-  def injectChildren(obj:C)(implicit writes:Writes[C]) = Json.toJson(obj)
+  def undelete(id:Long) : Action[AnyContent] = Action.async { implicit request =>
+    this.sessionManager.authenticatedRequest { implicit user =>
+      this.dal.retrieveById(id) match {
+        case Some(obj) =>
+          Ok(Json.toJson(this.dal.undelete(id, user)))
+        case None =>
+          throw new NotFoundException(s"Object with id [$id] was not found, this is most likely because it has been removed from the database and cannot be undeleted.")
+      }
+    }
+  }
 
   /**
     * Function can be implemented to extract more information than just the default create data,
@@ -156,7 +159,7 @@ trait ParentController[T<:BaseObject[Long], C<:BaseObject[Long]] extends CRUDCon
   def listChildren(id:Long, limit:Int, offset:Int) : Action[AnyContent] = Action.async { implicit request =>
     implicit val writes:Writes[C] = this.cWrites
     this.sessionManager.userAwareRequest { implicit user =>
-      Ok(Json.toJson(this.dal.listChildren(limit, offset)(id).map(this.injectChildren)))
+      Ok(Json.toJson(this.dal.listChildren(limit, offset)(id).map(this.childController.inject)))
     }
   }
 

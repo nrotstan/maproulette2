@@ -58,6 +58,7 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
       get[DateTime]("challenges.created") ~
       get[DateTime]("challenges.modified") ~
       get[Option[String]]("challenges.description") ~
+      get[Option[String]]("challenges.info_link") ~
       get[Long]("challenges.owner_id") ~
       get[Long]("challenges.parent_id") ~
       get[String]("challenges.instruction") ~
@@ -81,11 +82,12 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
       get[Option[String]]("challenges.custom_basemap") ~
       get[Boolean]("challenges.updatetasks") ~
       get[Option[String]]("locationJSON") ~
-      get[Option[String]]("boundingJSON") map {
-      case id ~ name ~ created ~ modified ~ description ~ ownerId ~ parentId ~ instruction ~
+      get[Option[String]]("boundingJSON") ~
+      get[Boolean]("deleted") map {
+      case id ~ name ~ created ~ modified ~ description ~ infoLink ~ ownerId ~ parentId ~ instruction ~
         difficulty ~ blurb ~ enabled ~ challenge_type ~ featured ~ checkin_comment ~ overpassql ~ remoteGeoJson ~
         status ~ defaultPriority ~ highPriorityRule ~ mediumPriorityRule ~ lowPriorityRule ~
-        defaultZoom ~ minZoom ~ maxZoom ~ defaultBasemap ~ customBasemap ~ updateTasks ~ location ~ bounding =>
+        defaultZoom ~ minZoom ~ maxZoom ~ defaultBasemap ~ customBasemap ~ updateTasks ~ location ~ bounding ~ deleted =>
         val hpr = highPriorityRule match {
           case Some(c) if StringUtils.isEmpty(c) || StringUtils.equals(c, "{}") => None
           case r => r
@@ -98,7 +100,7 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
           case Some(c) if StringUtils.isEmpty(c) || StringUtils.equals(c, "{}") => None
           case r => r
         }
-        new Challenge(id, name, created, modified, description,
+        new Challenge(id, name, created, modified, description, deleted, infoLink,
           ChallengeGeneral(ownerId, parentId, instruction, difficulty, blurb, enabled, challenge_type, featured, checkin_comment.getOrElse("")),
           ChallengeCreation(overpassql, remoteGeoJson),
           ChallengePriority(defaultPriority, hpr, mpr, lpr),
@@ -149,13 +151,13 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
     this.permission.hasObjectWriteAccess(challenge, user)
     this.cacheManager.withOptionCaching { () =>
       this.withMRTransaction { implicit c =>
-        SQL"""INSERT INTO challenges (name, owner_id, parent_id, difficulty, description, blurb,
+        SQL"""INSERT INTO challenges (name, owner_id, parent_id, difficulty, description, info_link, blurb,
                                       instruction, enabled, challenge_type, featured, checkin_comment,
                                       overpass_ql, remote_geo_json, status, default_priority, high_priority_rule,
                                       medium_priority_rule, low_priority_rule, default_zoom, min_zoom,
                                       max_zoom, default_basemap, custom_basemap, updatetasks)
               VALUES (${challenge.name}, ${challenge.general.owner}, ${challenge.general.parent}, ${challenge.general.difficulty},
-                      ${challenge.description}, ${challenge.general.blurb}, ${challenge.general.instruction},
+                      ${challenge.description}, ${challenge.infoLink}, ${challenge.general.blurb}, ${challenge.general.instruction},
                       ${challenge.general.enabled}, ${challenge.general.challengeType}, ${challenge.general.featured},
                       ${challenge.general.checkinComment}, ${challenge.creation.overpassQL}, ${challenge.creation.remoteGeoJson}, ${challenge.status},
                       ${challenge.priority.defaultPriority}, ${challenge.priority.highPriorityRule}, ${challenge.priority.mediumPriorityRule},
@@ -199,6 +201,7 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
         val parentId = (updates \ "parentId").asOpt[Long].getOrElse(cachedItem.general.parent)
         val difficulty = (updates \ "difficulty").asOpt[Int].getOrElse(cachedItem.general.difficulty)
         val description =(updates \ "description").asOpt[String].getOrElse(cachedItem.description.getOrElse(""))
+        val infoLink =(updates \ "infoLink").asOpt[String].getOrElse(cachedItem.infoLink.getOrElse(""))
         val challengeType = (updates \ "challengeType").asOpt[Int].getOrElse(cachedItem.general.challengeType)
         val blurb = (updates \ "blurb").asOpt[String].getOrElse(cachedItem.general.blurb.getOrElse(""))
         val instruction = (updates \ "instruction").asOpt[String].getOrElse(cachedItem.general.instruction)
@@ -224,7 +227,7 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
         val updateTasks = (updates \ "updateTasks").asOpt[Boolean].getOrElse(cachedItem.extra.updateTasks)
 
         SQL"""UPDATE challenges SET name = $name, owner_id = $ownerId, parent_id = $parentId, difficulty = $difficulty,
-                description = $description, blurb = $blurb, instruction = $instruction,
+                description = $description, info_link = $infoLink, blurb = $blurb, instruction = $instruction,
                 enabled = $enabled, featured = $featured, checkin_comment = $checkinComment, overpass_ql = $overpassQL,
                 remote_geo_json = $remoteGeoJson, status = $overpassStatus, default_priority = $defaultPriority,
                 high_priority_rule = ${if (StringUtils.isEmpty(highPriorityRule)) { Option.empty[String] } else { Some(highPriorityRule) }},
@@ -253,7 +256,7 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
     this.withMRConnection { implicit c =>
       val query = s"""SELECT ${this.retrieveColumns} FROM challenges c
                       INNER JOIN projects p ON p.id = c.parent_id
-                      WHERE challenge_type = $challengeType
+                      WHERE challenge_type = $challengeType AND c.deleted = false AND p.deleted = false
                       ${this.searchField("c.name")}
                       ${this.enabled(onlyEnabled, "p")} ${this.enabled(onlyEnabled, "c")}
                       ${this.parentFilter(parentId)}
@@ -306,6 +309,7 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
       val query = s"""SELECT ${this.retrieveColumns} FROM challenges c
                       INNER JOIN projects p ON p.id = c.parent_id
                       WHERE featured = TRUE ${this.enabled(enabledOnly, "c")} ${this.enabled(enabledOnly, "p")}
+                      AND c.deleted = false and p.deleted = false
                       AND 0 < (SELECT COUNT(*) FROM tasks WHERE parent_id = c.id)
                       LIMIT ${this.sqlLimit(limit)} OFFSET $offset"""
       SQL(query).as(this.parser.*)
@@ -337,6 +341,7 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
       val query = s"""SELECT ${this.retrieveColumns} FROM challenges c
                       INNER JOIN projects p ON c.parent_id = p.id
                       WHERE ${this.enabled(enabledOnly, "c")(None)} ${this.enabled(enabledOnly, "p")}
+                      AND c.deleted = false and p.deleted = false
                       ${this.order(Some("created"), "DESC", "c", true)}
                       LIMIT ${this.sqlLimit(limit)} OFFSET $offset"""
       SQL(query).as(this.parser.*)
@@ -377,23 +382,32 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
     * @param statusFilter Filter the displayed task cluster points by their status
     * @return A list of clustered point objects
     */
-  def getClusteredPoints(challengeId:Long, statusFilter:Option[List[Int]]=None)
+  def getClusteredPoints(challengeId:Long, statusFilter:Option[List[Int]]=None, limit:Int=2500)
                                (implicit c:Option[Connection]=None) : List[ClusteredPoint] = {
     this.withMRConnection { implicit c =>
       val filter = statusFilter match {
         case Some(s) => s"AND status IN (${s.mkString(",")}"
         case None => ""
       }
-      val pointParser = long("id") ~ str("name") ~ str("instruction") ~ str("location") ~ int("status") map {
-        case id ~ name ~ instruction ~ location ~ status =>
+      val pointParser = long("tasks.id") ~ str("tasks.name") ~ long("tasks.parent_id") ~ str("challenges.name") ~
+                        str("tasks.instruction") ~ str("location") ~ int("tasks.status") ~ int("tasks.priority") map {
+        case id ~ name ~ parentId ~ parentName ~ instruction ~ location ~ status ~ priority =>
           val locationJSON = Json.parse(location)
           val coordinates = (locationJSON \ "coordinates").as[List[Double]]
           val point = Point(coordinates(1), coordinates.head)
-          ClusteredPoint(id, -1, "", name, point, JsString(""), instruction, DateTime.now(), -1, Actions.ITEM_TYPE_TASK, status)
+          ClusteredPoint(id, -1, "", name, parentId, parentName, point, JsString(""),
+            instruction, DateTime.now(), -1, Actions.ITEM_TYPE_TASK, status, priority)
       }
-        SQL"""SELECT id, name, instruction, status,
-                      ST_AsGeoJSON(location) AS location
-              FROM tasks WHERE parent_id = $challengeId #$filter"""
+        SQL"""SELECT t.id, t.name, t.instruction, t.status, t.parent_id, c.name,
+                      ST_AsGeoJSON(t.location) AS location, t.priority
+              FROM tasks t
+              INNER JOIN challenges c ON c.id = t.parent_id
+              INNER JOIN projects p ON p.id = c.parent_id
+              WHERE t.parent_id = $challengeId
+                AND p.deleted = false AND c.deleted = false
+                AND ST_AsGeoJSON(t.location) IS NOT NULL
+              #$filter
+              LIMIT #${sqlLimit(limit)}"""
           .as(pointParser.*)
     }
   }
@@ -578,7 +592,8 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
                   (implicit c:Option[Connection]=None) : List[Challenge] = {
     this.withMRConnection { implicit c =>
       val parameters = new ListBuffer[NamedParameter]()
-      val whereClause = new StringBuilder()
+      // never include deleted items in the search
+      val whereClause = new StringBuilder("c.deleted = false AND p.deleted = false")
       val joinClause = new StringBuilder()
 
       parameters ++= addSearchToQuery(searchParameters, whereClause)
@@ -606,7 +621,7 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
       }
 
       searchParameters.projectEnabled match {
-        case Some(true) if searchParameters.projectId.isEmpty => this.appendInWhereClause(whereClause, this.enabled(true, "p")(None))
+        case Some(true) => this.appendInWhereClause(whereClause, this.enabled(true, "p")(None))
         case _ =>
       }
 
@@ -620,7 +635,7 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
            |SELECT ${this.retrieveColumns} FROM challenges c
            |INNER JOIN projects p ON p.id = c.parent_id
            |$joinClause
-           |${if (whereClause.nonEmpty) { s"WHERE $whereClause" } else { "" }}
+           |${s"WHERE $whereClause"}
            |LIMIT ${this.sqlLimit(limit)} OFFSET $offset
          """.stripMargin
 

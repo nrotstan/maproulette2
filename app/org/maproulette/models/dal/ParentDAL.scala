@@ -6,8 +6,10 @@ import java.sql.Connection
 
 import anorm._
 import org.maproulette.Config
+import org.maproulette.exception.NotFoundException
 import org.maproulette.models.BaseObject
 import org.maproulette.models.utils.DALHelper
+import org.maproulette.session.User
 
 /**
   * Parent data access layer that simply includes the ability to list the children of the current
@@ -23,6 +25,61 @@ trait ParentDAL[Key, T<:BaseObject[Key], C<:BaseObject[Key]] extends BaseDAL[Key
   // The specific columns to be retrieved for the child. This is used in the particular cases
   // where you want to retrieve derived data. Specifically data from PostGIS
   val childColumns:String = "*"
+
+
+  /**
+    * Deletes an item from the database, this will be limited to Projects and Challenges
+    *
+    * @param id        The id that you want to delete
+    * @param user      The user executing the task
+    * @param immediate If set to true it will delete it immediately, otherwise will delay the delete and simply set a flag for later deletion
+    * @return Count of deleted row(s)
+    */
+  override def delete(id: Key, user: User, immediate: Boolean)(implicit c: Option[Connection]): T = {
+    implicit val key = id
+    val deletedItem = this.cacheManager.withDeletingCache(Long => retrieveById) { implicit deletedItem =>
+      this.permission.hasObjectWriteAccess(deletedItem.asInstanceOf[BaseObject[Long]], user)
+      this.withMRTransaction { implicit c =>
+        val query = if (immediate) {
+          s"DELETE FROM ${this.tableName} WHERE id = {id}"
+        } else {
+          s"UPDATE ${this.tableName} SET deleted = true WHERE id = {id}"
+        }
+        SQL(query).on('id -> ParameterValue.toParameterValue(id)(p = keyToStatement)).executeUpdate()
+        Some(deletedItem)
+      }
+    }
+
+    deletedItem match {
+      case Some(item) => item
+      case None => throw new NotFoundException(s"No object with id $id found to delete")
+    }
+  }
+
+  /**
+    * If the object hasn't been deleted from the database but is set for deletion, then we can execute
+    * this function to undelete it
+    *
+    * @param id The id of the user that you want to undelete
+    * @param user The user executing the request
+    * @param c
+    * @return The object that is undeleted
+    */
+  def undelete(id:Key, user:User)(implicit c:Option[Connection] = None) : T = {
+    implicit val key = id
+    val deletedItem = this.cacheManager.withDeletingCache(Long => retrieveById) { implicit deletedItem =>
+      this.permission.hasObjectWriteAccess(deletedItem.asInstanceOf[BaseObject[Long]], user)
+      this.withMRTransaction { implicit c =>
+        val query = s"UPDATE ${this.tableName} SET deleted = false WHERE id = {id}"
+        SQL(query).on('id -> ParameterValue.toParameterValue(id)(p = keyToStatement)).executeUpdate()
+        Some(deletedItem)
+      }
+    }
+    deletedItem match {
+      case Some(item) => item
+      case None => throw new NotFoundException(s"Object with id [$id] was not found, most likely because the object has already been deleted")
+    }
+  }
 
   /**
     * Lists the children of the parent

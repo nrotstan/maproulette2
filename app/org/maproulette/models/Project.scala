@@ -24,7 +24,8 @@ case class Project(override val id: Long,
                    override val description: Option[String]=None,
                    groups:List[Group]=List.empty,
                    enabled:Boolean=false,
-                   displayName: Option[String]=None) extends BaseObject[Long] {
+                   displayName: Option[String]=None,
+                   deleted:Boolean=false) extends BaseObject[Long] {
 
   override val itemType: ItemType = ProjectType()
 }
@@ -56,7 +57,8 @@ object Project {
         )(Group.apply)(Group.unapply)
       ),
       "enabled" -> boolean,
-      "displayName" -> optional(text)
+      "displayName" -> optional(text),
+      "deleted" -> default(boolean, false)
     )(Project.apply)(Project.unapply)
   )
 

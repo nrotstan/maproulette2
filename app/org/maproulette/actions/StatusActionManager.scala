@@ -129,6 +129,33 @@ class StatusActionManager @Inject()(config: Config, db:Database)(implicit applic
     }
   }
 
+  /**
+    * Retrieves all the status actions executed against a specific task
+    *
+    * @param task The task to get all the status actions for
+    * @param user The user executing the task
+    * @param statusLimits Set a limit of the type of status sets you want returned
+    * @param limit limit the number of tasks coming back
+    * @return a list of StatusActionItems
+    */
+  def getStatusActions(task:Task, user:User, statusLimits:Option[List[Int]]=None, limit:Int=1) : List[StatusActionItem] = {
+    db.withConnection { implicit c =>
+      val sLimits = statusLimits match {
+        case Some(l) => s"""AND sa.status IN (${l.mkString(",")})"""
+        case None => ""
+      }
+
+      SQL"""SELECT * FROM status_actions sa
+            INNER JOIN users u ON u.osm_id = sa.osm_user_id
+            INNER JOIN projects p ON p.id = sa.project_id
+            INNER JOIN challenges c ON c.id = sa.challenge_id
+            WHERE sa.task_id = ${task.id}
+            #${sLimits}
+            ORDER BY sa.created DESC
+            LIMIT #${sqlLimit(limit)}""".as(this.parser.*)
+    }
+  }
+
   def getStatusUpdates(user:User, statusActionLimits: StatusActionLimits,
                        limit:Int=Config.DEFAULT_LIST_SIZE, offset:Int=0) : List[StatusActionItem] = {
     val parameters = new ListBuffer[NamedParameter]()

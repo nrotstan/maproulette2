@@ -110,7 +110,7 @@ object MPExceptionUtil {
     p.future
   }
 
-  private def manageException(e:Throwable) : Result = {
+  def manageException(e:Throwable) : Result = {
     e match {
       case e:InvalidException =>
         Logger.error(e.getMessage, e)

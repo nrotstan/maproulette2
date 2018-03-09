@@ -7,9 +7,9 @@ import org.joda.time.DateTime
 import org.maproulette.actions.{ItemType, TaskType}
 import org.maproulette.utils.Utils
 import play.api.data.Form
+import play.api.data.format.Formats._
 import play.api.data.Forms._
 import play.api.libs.json._
-import play.api.libs.functional.syntax._
 
 /**
   * The primary object in MapRoulette is the task, this is the object that defines the actual problem
@@ -39,7 +39,8 @@ case class Task(override val id:Long,
                 location: Option[String]=None,
                 geometries:String,
                 status:Option[Int]=None,
-                priority:Int=Challenge.PRIORITY_HIGH) extends BaseObject[Long] with DefaultReads with LowPriorityDefaultReads {
+                priority:Int=Challenge.PRIORITY_HIGH,
+                changesetId:Option[Long]=None) extends BaseObject[Long] with DefaultReads with LowPriorityDefaultReads {
   override val itemType: ItemType = TaskType()
 
   def getGeometryProperties() : List[Map[String, String]] = {
@@ -93,7 +94,9 @@ object Task {
       Utils.insertIntoJson(updated, "geometries", Json.parse(o.geometries), true)
     }
 
-    override def reads(json: JsValue): JsResult[Task] = Json.fromJson[Task](json)(Json.reads[Task])
+    override def reads(json: JsValue): JsResult[Task] = {
+      Json.fromJson[Task](json)(Json.reads[Task])
+    }
   }
 
   val STATUS_CREATED = 0
@@ -191,7 +194,8 @@ object Task {
       "location" -> optional(text),
       "geometries" -> nonEmptyText,
       "status" -> optional(number),
-      "priority" -> default(number, Challenge.PRIORITY_HIGH)
+      "priority" -> default(number, Challenge.PRIORITY_HIGH),
+      "changesetId" -> optional(longNumber)
     )(Task.apply)(Task.unapply)
   )
 

@@ -5,6 +5,7 @@ package org.maproulette.session
 import java.net.URLDecoder
 
 import org.maproulette.utils.Utils
+import play.api.Logger
 import play.api.libs.json.{JsObject, Json}
 import play.api.mvc.{AnyContent, Request}
 
@@ -18,10 +19,10 @@ import play.api.mvc.{AnyContent, Request}
   */
 case class SearchLocation(left:Double, bottom:Double, right:Double, top:Double)
 
-case class SearchParameters(projectId:Option[Long]=None,
+case class SearchParameters(projectIds:Option[List[Long]]=None,
                             projectSearch:Option[String]=None,
                             projectEnabled:Option[Boolean]=None,
-                            challengeId:Option[Long]=None,
+                            challengeIds:Option[List[Long]]=None,
                             challengeTags:Option[List[String]]=None,
                             challengeTagConjunction:Option[Boolean]=None,
                             challengeSearch:Option[String]=None,
@@ -36,14 +37,14 @@ case class SearchParameters(projectId:Option[Long]=None,
                             bounding:Option[SearchLocation]=None,
                             fuzzySearch:Option[Int]=None,
                             owner:Option[String]=None) {
-  def getProjectId : Option[Long] = projectId match {
-    case Some(v) if v == -1 => None
-    case _ => projectId
+  def getProjectIds : Option[List[Long]] = projectIds match {
+    case Some(v) => Some(v.filter(_ != -1))
+    case None => None
   }
 
-  def getChallengeId : Option[Long] = challengeId match {
-    case Some(v) if v == -1 => None
-    case _ => challengeId
+  def getChallengeIds : Option[List[Long]] = challengeIds match {
+    case Some(v) => Some(v.filter(_ != -1))
+    case None => None
   }
 
   def getPriority : Option[Int] = priority match {
@@ -65,8 +66,21 @@ object SearchParameters {
   implicit val paramsWrites = Json.writes[SearchParameters]
   implicit val paramsReads = Json.reads[SearchParameters]
 
-  def convert(value:String) : SearchParameters =
-    Utils.omitEmpty(Json.parse(URLDecoder.decode(value, "UTF-8")).as[JsObject], false, false).as[SearchParameters]
+  /**
+    * Will attempt to convert the cookie to SearchParameters, if it fails it simply initializes an
+    * empty SearchParameters
+    *
+    * @param value
+    * @return
+    */
+  def convert(value:String) : SearchParameters = {
+    try {
+      Utils.omitEmpty(Json.parse(URLDecoder.decode(value, "UTF-8")).as[JsObject], false, false).as[SearchParameters]
+    } catch {
+      case e:Exception =>
+        SearchParameters()
+    }
+  }
 
   /**
     * Retrieves the search cookie from the cookie list and creates a search parameter object
@@ -84,15 +98,25 @@ object SearchParameters {
       case None => SearchParameters()
     }
 
+    val projectIds = request.getQueryString("pid") match {
+      case Some(q) => Utils.toLongList(q)
+      case None => params.projectIds
+    }
+
+    val challengeIds = request.getQueryString("cid") match {
+      case Some(q) => Utils.toLongList(q)
+      case None => params.challengeIds
+    }
+
     block(SearchParameters(
       //projectID
-      this.getLongParameter(request.getQueryString("pid"), params.projectId),
+      projectIds,
       //projectSearch
       this.getStringParameter(request.getQueryString("ps"), params.projectSearch),
       //projectEnabled
       this.getBooleanParameter(request.getQueryString("pe"), params.projectEnabled),
       //challengeID
-      this.getLongParameter(request.getQueryString("cid"), params.challengeId),
+      challengeIds,
       //challengeTags
       request.getQueryString("ct") match {
         case Some(v) => Some(v.split(",").toList)

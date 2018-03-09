@@ -52,6 +52,9 @@ class Config @Inject() (implicit val application:Application) {
   lazy val numberOfActivities : Int =
     this.config.getInt(Config.KEY_RECENT_ACTIVITY).getOrElse(Config.DEFAULT_RECENT_ACTIVITY)
 
+  lazy val osmMatcherBatchSize : Int =
+    this.config.getInt(Config.KEY_SCHEDULER_OSM_MATCHER_BATCH_SIZE).getOrElse(Config.DEFAULT_VIRTUAL_CHALLENGE_BATCH_SIZE)
+
   lazy val virtualChallengeLimit : Double =
     this.config.getDouble(Config.KEY_VIRTUAL_CHALLENGE_LIMIT).getOrElse(Config.DEFAULT_VIRTUAL_CHALLENGE_LIMIT)
 
@@ -61,8 +64,21 @@ class Config @Inject() (implicit val application:Application) {
   lazy val virtualChallengeExpiry : Duration =
     Duration(this.config.getString(Config.KEY_VIRTUAL_CHALLENGE_EXPIRY).getOrElse(Config.DEFAULT_VIRTUAL_CHALLENGE_EXPIRY))
 
+  lazy val changeSetTimeLimit : Duration =
+    Duration(this.config.getString(Config.KEY_CHANGESET_TIME_LIMIT).getOrElse(Config.DEFAULT_CHANGESET_HOUR_LIMIT))
+
+  lazy val changeSetEnabled : Boolean = this.config.getBoolean(Config.KEY_CHANGESET_ENABLED).getOrElse(Config.DEFAULT_CHANGESET_ENABLED)
+
+  lazy val osmMatcherEnabled : Boolean = this.config.getBoolean(Config.KEY_SCHEDULER_OSM_MATCHER_ENABLED).getOrElse(Config.DEFAULT_OSM_MATCHER_ENABLED)
+
+  lazy val osmMatcherManualOnly : Boolean = this.config.getBoolean(Config.KEY_SCHEDULER_OSM_MATCHER_MANUAL).getOrElse(Config.DEFAULT_OSM_MATCHER_MANUAL)
+
+  lazy val allowMatchOSM = changeSetEnabled || osmMatcherEnabled || osmMatcherManualOnly
+
+  lazy val getOSMServer : String = this.config.getString(Config.KEY_OSM_SERVER).get
+
   lazy val getOSMOauth : OSMOAuth = {
-    val osmServer = this.config.getString(Config.KEY_OSM_SERVER).get
+    val osmServer = this.getOSMServer
     OSMOAuth(
       osmServer + this.config.getString(Config.KEY_OSM_USER_DETAILS_URL).get,
       osmServer + this.config.getString(Config.KEY_OSM_REQUEST_TOKEN_URL).get,
@@ -131,6 +147,8 @@ object Config {
   val KEY_ACTION_LEVEL = s"$GROUP_MAPROULETTE.action.level"
   val KEY_NUM_OF_CHALLENGES = s"$GROUP_MAPROULETTE.limits.challenges"
   val KEY_RECENT_ACTIVITY = s"$GROUP_MAPROULETTE.limits.activities"
+  val KEY_CHANGESET_TIME_LIMIT = s"$GROUP_MAPROULETTE.tasks.changesets.timeLimit"
+  val KEY_CHANGESET_ENABLED = s"$GROUP_MAPROULETTE.tasks.changesets.enabled"
   val KEY_MAX_SAVED_CHALLENGES = s"$GROUP_MAPROULETTE.limits.saved"
   val KEY_SEMANTIC_VERSION = s"$GROUP_MAPROULETTE.version"
   val KEY_SESSION_TIMEOUT = s"$GROUP_MAPROULETTE.session.timeout"
@@ -145,6 +163,11 @@ object Config {
   val KEY_SCHEDULER_CLEAN_TASKS_STATUS_FILTER = s"$SUB_GROUP_SCHEDULER.cleanOldTasks.statusFilter"
   val KEY_SCHEDULER_CLEAN_TASKS_OLDER_THAN = s"$SUB_GROUP_SCHEDULER.cleanOldTasks.olderThan"
   val KEY_SCHEDULER_CLEAN_VC_INTEVAL = s"$SUB_GROUP_SCHEDULER.cleanExpiredVCs.interval"
+  val KEY_SCHEDULER_OSM_MATCHER_INTERVAL = s"$SUB_GROUP_SCHEDULER.osmMatcher.interval"
+  val KEY_SCHEDULER_OSM_MATCHER_BATCH_SIZE = s"$SUB_GROUP_SCHEDULER.osmMatcher.batchSize"
+  val KEY_SCHEDULER_OSM_MATCHER_ENABLED = s"$SUB_GROUP_SCHEDULER.osmMatcher.enabled"
+  val KEY_SCHEDULER_OSM_MATCHER_MANUAL = s"$SUB_GROUP_SCHEDULER.osmMatcher.manual"
+  val KEY_SCHEDULER_CLEAN_DELETED = s"$SUB_GROUP_SCHEDULER.cleanDeleted.interval"
 
   val GROUP_OSM = "osm"
   val KEY_OSM_SERVER = s"$GROUP_OSM.server"
@@ -181,4 +204,9 @@ object Config {
   val DEFAULT_VIRTUAL_CHALLENGE_LIMIT = 100
   val DEFAULT_VIRTUAL_CHALLENGE_BATCH_SIZE = 500
   val DEFAULT_VIRTUAL_CHALLENGE_EXPIRY ="6 hours"
+  val DEFAULT_CHANGESET_HOUR_LIMIT = "1 hour"
+  val DEFAULT_CHANGESET_ENABLED = false
+  val DEFAULT_OSM_MATCHER_ENABLED = false
+  val DEFAULT_OSM_MATCHER_MANUAL = false
+  val DEFAULT_MATCHER_BATCH_SIZE = 5000
 }

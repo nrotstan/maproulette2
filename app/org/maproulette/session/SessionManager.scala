@@ -227,7 +227,7 @@ class SessionManager @Inject() (ws:WSClient, dalManager: DALManager, config:Conf
     details.get() onComplete {
       case Success(detailsResponse) if detailsResponse.status == HttpResponseStatus.OK.code() =>
         try {
-          val newUser = User(detailsResponse.body, accessToken, config)
+          val newUser = User.generate(detailsResponse.body, accessToken, config)
           val osmUser = this.dalManager.user.insert(newUser, user)
           p success Some(this.dalManager.user.initializeHomeProject(osmUser))
         } catch {
@@ -319,12 +319,30 @@ class SessionManager @Inject() (ws:WSClient, dalManager: DALManager, config:Conf
     *
     * @param block The block of code to execute after a valid session has been found
     * @param request The incoming http request
+    * @param requireSuperUser Whether a super user is required for this request
     * @return The result from the block of code
     */
   def authenticatedRequest(block:User => Result)
                           (implicit request:Request[Any], requireSuperUser:Boolean=false) : Future[Result] = {
     MPExceptionUtil.internalAsyncExceptionCatcher { () =>
       this.authenticated(Left(block))
+    }
+  }
+
+  /**
+   * For an authenticated request we expect there to currently be a valid session. If no session is
+   * available an OAuthNotAuthorizedException will be thrown. This function differs from the
+   * authenticatedRequest as it allows the lambda function to return a future
+   *
+   * @param block The block of code to execute after a valid session has been found
+   * @param request The incoming http request
+   * @param requireSuperUser Whether a super user is required for this request
+   * @return The result from the block of code
+   */
+  def authenticatedFutureRequest(block:User => Future[Result])
+                                (implicit request:Request[Any], requireSuperUser:Boolean=false) : Future[Result] = {
+    MPExceptionUtil.internalAsyncExceptionCatcher{ () =>
+      this.authenticated(Right(block))
     }
   }
 

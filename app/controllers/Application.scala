@@ -94,7 +94,7 @@ class Application @Inject() (val messagesApi: MessagesApi,
     // if using static path, just pull the file directly, otherwise pull from http source
     val promise = Promise[JsValue]
     config.mr3StaticPath match {
-      case Some(path) => promise success Json.parse(Files.readAllBytes(Paths.get(path + "/asset-manifest.json")))
+      case Some(path) => promise success Json.parse(Files.readAllBytes(Paths.get(s"$path/${config.mr3JSManifest}")))
       case None =>
         if (config.mr3DevMode) {
           promise success Json.parse("""

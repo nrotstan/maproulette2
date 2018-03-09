@@ -9,10 +9,11 @@ import org.joda.time.format.DateTimeFormat
 import org.maproulette.Config
 import org.maproulette.actions.{ItemType, UserType}
 import org.maproulette.models.BaseObject
+import org.maproulette.utils.Utils
 import play.api.data.Form
 import play.api.data.Forms._
 import play.api.libs.Crypto
-import play.api.libs.json.{Json, Reads, Writes}
+import play.api.libs.json._
 import play.api.libs.oauth.RequestToken
 
 import scala.xml.{Elem, XML}
@@ -106,7 +107,8 @@ case class User(override val id: Long,
                 groups: List[Group] = List(),
                 apiKey: Option[String] = None,
                 guest: Boolean = false,
-                settings: UserSettings = UserSettings()) extends BaseObject[Long] {
+                settings: UserSettings = UserSettings(),
+                properties: Option[String] = None) extends BaseObject[Long] {
   // for users the display name is always retrieved from OSM
   override def name: String = osmProfile.displayName
 
@@ -140,12 +142,28 @@ case class User(override val id: Long,
   */
 object User {
   implicit val tokenWrites: Writes[RequestToken] = Json.writes[RequestToken]
+  implicit val tokenReads: Reads[RequestToken] = Json.reads[RequestToken]
   implicit val settingsWrites: Writes[UserSettings] = Json.writes[UserSettings]
   implicit val settingsReads: Reads[UserSettings] = Json.reads[UserSettings]
   implicit val userGroupWrites: Writes[Group] = Group.groupWrites
+  implicit val userGroupReads: Reads[Group] = Group.groupReads
   implicit val locationWrites: Writes[Location] = Json.writes[Location]
+  implicit val locationReads: Reads[Location] = Json.reads[Location]
   implicit val osmWrites: Writes[OSMProfile] = Json.writes[OSMProfile]
-  implicit val userWrites: Writes[User] = Json.writes[User]
+  implicit val osmReads: Reads[OSMProfile] = Json.reads[OSMProfile]
+  implicit object UserFormat extends Format[User] {
+    override def writes(o: User): JsValue = {
+      implicit val taskWrites: Writes[User] = Json.writes[User]
+      val original = Json.toJson(o)(Json.writes[User])
+      val updated = o.properties match {
+        case Some(p) => Utils.insertIntoJson(original, "properties", Json.parse(p), true)
+        case None => original
+      }
+      Utils.insertIntoJson(updated, "properties", Json.parse(o.properties.getOrElse("{}")), true)
+    }
+
+    override def reads(json: JsValue): JsResult[User] = Json.fromJson[User](json)(Json.reads[User])
+  }
 
   val DEFAULT_GUEST_USER_ID = -998
   val DEFAULT_SUPER_USER_ID = -999
@@ -171,7 +189,7 @@ object User {
     * @param requestToken The access token used to retrieve the OSM details
     * @return A user object based on the XML details provided
     */
-  def apply(root: Elem, requestToken: RequestToken, config: Config): User = {
+  def generate(root: Elem, requestToken: RequestToken, config: Config): User = {
     val userXML = (root \ "user").head
     val displayName = userXML \@ "display_name"
     val osmAccountCreated = userXML \@ "account_created"
@@ -181,7 +199,6 @@ object User {
       case Some(img) => img \@ "href"
       case None => "/assets/images/user_no_image.png"
     }
-    // todo currently setting to 0,0 lat,lon but will need to set a default or null or something
     val location = (userXML \ "home").headOption match {
       case Some(loc) => Location((loc \@ "lat").toDouble, (loc \@ "lon").toDouble)
       case None => Location(47.608013, -122.335167)
@@ -210,8 +227,8 @@ object User {
     * @param requestToken The access token used to retrieve the OSM details
     * @return A user object based on the XML details provided
     */
-  def apply(userXML: String, requestToken: RequestToken, config: Config): User =
-    apply(XML.loadString(userXML), requestToken, config)
+  def generate(userXML: String, requestToken: RequestToken, config: Config): User =
+    generate(XML.loadString(userXML), requestToken, config)
 
   /**
     * Creates a guest user object with default information.

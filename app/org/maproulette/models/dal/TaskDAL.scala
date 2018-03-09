@@ -7,13 +7,14 @@ import javax.inject.{Inject, Provider, Singleton}
 
 import anorm.SqlParser._
 import anorm._
+import com.vividsolutions.jts.geom.Envelope
 import org.apache.commons.lang3.StringUtils
-import org.joda.time.DateTime
+import org.joda.time.{DateTime, DateTimeZone}
 import org.maproulette.Config
-import org.maproulette.actions.{ActionManager, Actions, StatusActionManager, TaskType}
+import org.maproulette.actions._
 import org.maproulette.cache.CacheManager
-import org.maproulette.exception.{InvalidException, NotFoundException, UniqueViolationException}
-import org.maproulette.models.utils.{AND, DALHelper}
+import org.maproulette.exception.{InvalidException, NotFoundException}
+import org.maproulette.models.utils.DALHelper
 import org.maproulette.models._
 import org.maproulette.permissions.Permission
 import org.maproulette.session.dal.UserDAL
@@ -21,10 +22,14 @@ import org.maproulette.session.{SearchParameters, User}
 import play.api.Logger
 import play.api.db.Database
 import play.api.libs.json._
+import play.api.libs.ws.WSClient
+import org.wololo.geojson.{FeatureCollection, GeoJSONFactory}
+import org.wololo.jts2geojson.GeoJSONReader
 
 import scala.collection.mutable.ListBuffer
-import scala.concurrent.Future
+import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success, Try}
+import scala.xml.XML
 
 /**
   * The data access layer for the Task objects
@@ -39,7 +44,8 @@ class TaskDAL @Inject()(override val db: Database,
                         projectDAL: Provider[ProjectDAL],
                         challengeDAL: Provider[ChallengeDAL],
                         actions: ActionManager,
-                        statusActions:StatusActionManager)
+                        statusActions:StatusActionManager,
+                        ws:WSClient)
   extends BaseDAL[Long, Task] with DALHelper with TagDALMixin[Task] with Locking[Task] {
   import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -62,9 +68,10 @@ class TaskDAL @Inject()(override val db: Database,
       get[Option[String]]("tasks.instruction") ~
       get[Option[String]]("location") ~
       get[Option[Int]]("tasks.status") ~
-      get[Int]("tasks.priority") map {
-      case id ~ name ~ created ~ modified ~ parent_id ~ instruction ~ location ~ status ~ priority =>
-        Task(id, name, created, modified, parent_id, instruction, location, this.getTaskGeometries(id), status, priority)
+      get[Int]("tasks.priority") ~
+      get[Option[Long]]("tasks.changeset_id") map {
+      case id ~ name ~ created ~ modified ~ parent_id ~ instruction ~ location ~ status ~ priority ~ changesetId =>
+        Task(id, name, created, modified, parent_id, instruction, location, this.getTaskGeometries(id), status, priority, changesetId)
     }
   }
 
@@ -169,22 +176,22 @@ class TaskDAL @Inject()(override val db: Database,
       val name = (value \ "name").asOpt[String].getOrElse(cachedItem.name)
       val parentId = (value \ "parentId").asOpt[Long].getOrElse(cachedItem.parent)
       val instruction = (value \ "instruction").asOpt[String].getOrElse(cachedItem.instruction.getOrElse(""))
-      val location = (value \ "location").asOpt[String].getOrElse(cachedItem.location.getOrElse(""))
       val status = (value \ "status").asOpt[Int].getOrElse(cachedItem.status.getOrElse(0))
       if (!Task.isValidStatusProgression(cachedItem.status.getOrElse(0), status)) {
         throw new InvalidException(s"Could not set status for task [$id], " +
           s"progression from ${cachedItem.status.getOrElse(0)} to $status not valid.")
       }
       val priority = (value \ "priority").asOpt[Int].getOrElse(cachedItem.priority)
-      val geometries = (value \ "geometries").asOpt[String].getOrElse("")
+      val geometries = (value \ "geometries").asOpt[String].getOrElse(cachedItem.geometries)
+      val changesetId = (value \ "changesetId").asOpt[Long].getOrElse(cachedItem.changesetId.getOrElse(-1L))
 
       this.mergeUpdate(cachedItem.copy(name = name,
         parent = parentId,
         instruction = Some(instruction),
-        location = Some(location),
         status = Some(status),
         geometries = geometries,
-        priority = priority), user)
+        priority = priority,
+        changesetId = Some(changesetId)), user)
     }
   }
 
@@ -201,10 +208,14 @@ class TaskDAL @Inject()(override val db: Database,
     */
   override def mergeUpdate(element: Task, user: User)(implicit id: Long, c: Option[Connection] = None): Option[Task] = {
     this.permission.hasObjectWriteAccess(element, user)
-    // clear the cache, and force a refresh
-    this.cacheManager.deleteByName(element.name)
+    // before clearing the cache grab the cachedItem
+    // by setting the delete implicit to true we clear out the cache for the element
+    // The cachedItem could be
+    val cachedItem = this.cacheManager.withUpdatingCache(Long => retrieveById) { implicit cachedItem =>
+      Some(cachedItem)
+    }(id, true, true)
     val updatedTask:Option[Task] = this.withMRTransaction { implicit c =>
-        val query = "SELECT create_update_task({name}, {parentId}, {instruction}, {status}, {id}, {priority}, {reset})"
+        val query = "SELECT create_update_task({name}, {parentId}, {instruction}, {status}, {id}, {priority}, {changesetId}, {reset})"
 
         val updatedTaskId = SQL(query).on(
           NamedParameter("name", ParameterValue.toParameterValue(element.name)),
@@ -213,9 +224,10 @@ class TaskDAL @Inject()(override val db: Database,
           NamedParameter("status", ParameterValue.toParameterValue(element.status.getOrElse(Task.STATUS_CREATED))),
           NamedParameter("id", ParameterValue.toParameterValue(element.id)),
           NamedParameter("priority", ParameterValue.toParameterValue(element.priority)),
+          NamedParameter("changesetId", ParameterValue.toParameterValue(element.changesetId.getOrElse(-1L))),
           NamedParameter("reset", ParameterValue.toParameterValue(config.taskReset + " days"))
         ).as(long("create_update_task").*).head
-        if (StringUtils.isNotEmpty(element.geometries)) {
+        if (cachedItem.isEmpty || !StringUtils.equalsIgnoreCase(cachedItem.get.geometries, element.geometries)) {
           c.commit()
           this.updateGeometries(updatedTaskId, Json.parse(element.geometries))
           this.updateTaskLocation(updatedTaskId)
@@ -394,11 +406,116 @@ class TaskDAL @Inject()(override val db: Database,
       } catch {
         case e: Exception => Logger.warn(e.getMessage)
       }
+      if (config.changeSetEnabled) {
+        // try and match the current task with a changeset from the user
+        Future {
+          c.commit()
+          this.matchToOSMChangeSet(task.copy(status = Some(status)), user)
+        }
+      }
       updatedRows
     }
 
     this.cacheManager.withOptionCaching { () => Some(task.copy(status = Some(status))) }
     updatedRows
+  }
+
+  /**
+    * Tries to match a specific changeset in OSM to the task in MapRoulette
+    *
+    * @param task The task that was fixed
+    * @param user The user making the request
+    * @param c An implicit connection
+    */
+  def matchToOSMChangeSet(task:Task, user:User, immediate:Boolean=true)(implicit c:Option[Connection]=None) : Future[Boolean] = {
+    val result = Promise[Boolean]
+    if (config.allowMatchOSM) {
+      task.status match {
+        case Some(Task.STATUS_FIXED) =>
+          val currentDateTimeUTC = DateTime.now(DateTimeZone.UTC)
+          val statusAction = statusActions.getStatusActions(task, user, Some(List(Task.STATUS_FIXED))).headOption
+          statusAction match {
+            case Some(sa) =>
+              this.getSortedChangeList(sa) onComplete {
+                case Success(response) =>
+                  val responseList = response.map(_.id)
+                  response.find(c => {
+                    // check the bounding box of the changeset, and make sure that the task geometry
+                    // bounding box at the very least intersects with the changeset bounding box
+                    if (c.hasMapRouletteComment) {
+                      true
+                    } else {
+                      val feature = GeoJSONFactory.create(task.geometries).asInstanceOf[FeatureCollection]
+                      val reader = new GeoJSONReader()
+                      val envelope = new Envelope()
+                      feature.getFeatures.foreach(f => {
+                        val current = reader.read(f.getGeometry)
+                        envelope.expandToInclude(current.getBoundary.getEnvelopeInternal)
+                      })
+
+                      val changesetEnvelope = new Envelope(c.minLon, c.maxLon, c.minLat, c.maxLat)
+                      changesetEnvelope.intersects(envelope)
+                    }
+                  }) match {
+                    case Some(change) =>
+                      this.withMRConnection { implicit c =>
+                        Logger.debug(s"Updating task [${task.id}] with changeset [${change.id}]")
+                        SQL(s"""UPDATE tasks SET changeset_id = ${change.id} WHERE id = ${task.id}""").executeUpdate()
+                      }
+                      result success true
+                    case None =>
+                      this.withMRConnection { implicit c =>
+                        Logger.debug(s"No changeset found for user ${sa.osmUserId} on Task [${task.id}] from changesets [${responseList.mkString(",")}]")
+                        // if we can't find any viable option set the id to -2 so that we don't try again
+                        // but only set it to -2 if the current time is 1 hour after the set time for the task
+                        if (Math.abs(currentDateTimeUTC.getMillis - sa.created.getMillis) > (config.changeSetTimeLimit.toHours * 3600 * 1000)) {
+                          SQL(s"""UPDATE tasks SET changeset_id = -2 WHERE id = ${task.id}""").executeUpdate()
+                        }
+                      }
+                      result success false
+                  }
+                case Failure(error) => result success false
+              }
+            case None => result success false
+          }
+        case _ =>
+          // throw some message here about something
+          result success false
+      }
+    } else {
+      result success false
+    }
+    result.future
+  }
+
+  /**
+    * This gets the sorted list of changesets. The sorting is based on how close a changeset is to the time
+    * that the task was fixed. It probably would be more efficient to
+    *
+    * @param statusAction The StatusActionItem that is for the action that set the task to fixed
+    * @return A list of sorted changesets
+    */
+  private def getSortedChangeList(statusAction:StatusActionItem) : Future[Seq[Changeset]] = {
+    val result = Promise[Seq[Changeset]]
+    val format = "YYYY-MM-dd'T'HH:mm:ss'Z'"
+    val fixedTimeDiff = statusAction.created.getMillis
+    val prevHours = statusAction.created.minusHours(config.changeSetTimeLimit.toHours.toInt).toString(format)
+    val nextHours = statusAction.created.plusHours(config.changeSetTimeLimit.toHours.toInt).toString(format)
+    ws.url(s"${config.getOSMServer}/api/0.6/changesets?user=${statusAction.osmUserId}&time=$prevHours,$nextHours")
+      .withHeaders("User-Agent" -> "MapRoulette").get() onComplete {
+      case Success(response) =>
+        if (response.status == 200) {
+          val changeSetList = ChangesetParser.parse(XML.loadString(response.body)).filter(!_.open)
+          val sortedList = changeSetList.sortWith((c1, c2) => {
+            Math.abs(c1.createdAt.getMillis - fixedTimeDiff) < Math.abs(c2.createdAt.getMillis - fixedTimeDiff)
+          })
+          result success sortedList
+        } else {
+          result failure new InvalidException(s"Response failed with status ${response.status} messages ${response.statusText}")
+        }
+      case Failure(error) => result failure error
+    }
+    result.future
   }
 
   /**
@@ -508,13 +625,18 @@ class TaskDAL @Inject()(override val db: Database,
     * @return The id of the random challenge
     */
   private def getRandomChallenge(params: SearchParameters)(implicit c:Option[Connection]=None) : Option[Long] = {
-    params.challengeId match {
-      case Some(id) if id > -1 => Some(id)
-      case _ =>
+    params.getChallengeIds match {
+      case Some(v) if v.lengthCompare(1) == 0 => Some(v.head)
+      case v =>
         withMRConnection { implicit c =>
           val parameters = new ListBuffer[NamedParameter]()
           val whereClause = new StringBuilder
           val joinClause = new StringBuilder
+
+          v match {
+            case Some(l) if l.nonEmpty => appendInWhereClause(whereClause, s"c.id IN (${l.mkString(",")})")
+            case None => // ignore
+          }
 
           if (params.enabledChallenge) {
             appendInWhereClause(whereClause, "c.enabled = true")
@@ -525,6 +647,9 @@ class TaskDAL @Inject()(override val db: Database,
 
           parameters ++= addChallengeTagMatchingToQuery(params, whereClause, joinClause)
           parameters ++= addSearchToQuery(params, whereClause)
+
+          //add a where clause that just makes sure that any random challenge retrieved actually has some tasks in it
+          appendInWhereClause(whereClause, "1 = (SELECT 1 FROM tasks WHERE parent_id = c.id LIMIT 1)")
 
           val query = s"""
                         SELECT c.id FROM challenges c
@@ -645,7 +770,10 @@ class TaskDAL @Inject()(override val db: Database,
         withMRConnection { implicit c =>
           val parameters = new ListBuffer[NamedParameter]()
           val whereClause = new StringBuilder(
-            s"WHERE t.location @ ST_MakeEnvelope (${sl.left}, ${sl.bottom}, ${sl.right}, ${sl.top}, 4326)"
+            s"""
+               WHERE t.location @ ST_MakeEnvelope (${sl.left}, ${sl.bottom}, ${sl.right}, ${sl.top}, 4326)
+               AND p.deleted = false AND c.deleted = false
+              """
           )
           val joinClause = new StringBuilder(
             """
@@ -669,19 +797,21 @@ class TaskDAL @Inject()(override val db: Database,
 
           val query =
             s"""
-              SELECT t.id, t.name, t.instruction, t.status,
-                     ST_AsGeoJSON(t.location) AS location FROM tasks t
+              SELECT t.id, t.name, t.parent_id, c.name, t.instruction, t.status,
+                     ST_AsGeoJSON(t.location) AS location, priority FROM tasks t
               ${joinClause.toString()}
               ${whereClause.toString()}
               ORDER BY RANDOM()
               LIMIT ${sqlLimit(limit)} OFFSET $offset
             """
-          val pointParser = long("id") ~ str("name") ~ str("instruction") ~ str("location") ~ int("status") map {
-            case id ~ name ~ instruction ~ location ~ status =>
+          val pointParser = long("tasks.id") ~ str("tasks.name") ~ int("tasks.parent_id") ~ str("challenges.name") ~
+                            str("tasks.instruction") ~ str("location") ~ int("tasks.status") ~ int("tasks.priority") map {
+            case id ~ name ~ parentId ~ parentName ~ instruction ~ location ~ status ~ priority =>
               val locationJSON = Json.parse(location)
               val coordinates = (locationJSON \ "coordinates").as[List[Double]]
               val point = Point(coordinates(1), coordinates.head)
-              ClusteredPoint(id, -1, "", name, point, JsString(""), instruction, DateTime.now(), -1, Actions.ITEM_TYPE_TASK, status)
+              ClusteredPoint(id, -1, "", name, parentId, parentName, point, JsString(""),
+                instruction, DateTime.now(), -1, Actions.ITEM_TYPE_TASK, status, priority)
           }
           sqlWithParameters(query, parameters).as(pointParser.*)
         }

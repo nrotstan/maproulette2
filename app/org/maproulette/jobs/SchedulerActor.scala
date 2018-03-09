@@ -13,8 +13,10 @@ import org.joda.time.DateTime
 import org.maproulette.Config
 import org.maproulette.jobs.SchedulerActor.RunJob
 import org.maproulette.metrics.Metrics
+import org.maproulette.models.Task
 import org.maproulette.models.Task.STATUS_CREATED
 import org.maproulette.models.dal.DALManager
+import org.maproulette.session.User
 
 /**
   * The main actor that handles all scheduled activities
@@ -41,6 +43,9 @@ class SchedulerActor @Inject() (config:Config,
     case RunJob("cleanOldTasks", action) => this.cleanOldTasks(action)
     case RunJob("updateTaskLocations", action) => this.updateTaskLocations(action.toLong)
     case RunJob("cleanExpiredVirtualChallenges", action) => this.cleanExpiredVirtualChallenges(action)
+    case RunJob("FindChangeSets", action) => this.findChangeSets(action)
+    case RunJob("OSMChangesetMatcher", action) => this.matchChangeSets(action)
+    case RunJob("cleanDeleted", action) => this.cleanDeleted(action)
   }
 
   /**
@@ -153,6 +158,76 @@ class SchedulerActor @Inject() (config:Config,
       // Clear the task cache if any were deleted
       if (numberOfDeleted > 0) {
         this.dALManager.virtualChallenge.cacheManager.clearCaches
+      }
+    }
+  }
+
+  /**
+    * Run through all the tasks and match OSM Changesets to fixed tasks. This will run through tasks
+    * 5000 at a time, and limit the tasks returned to only tasks that have actually had their status
+    * set to FIXED and changeset value not set to -2. If the value is -2 then it assumes that we have
+    * already tried to match the changeset and couldn't find any viable option for it.
+    *
+    * @param str
+    */
+  def matchChangeSets(str:String) : Unit = {
+    if (config.osmMatcherEnabled) {
+      db.withConnection { implicit c =>
+        val query =
+          s"""
+             |SELECT ${dALManager.task.retrieveColumns} FROM tasks
+             |WHERE status = 1 AND changeset_id = -1
+             |LIMIT ${config.osmMatcherBatchSize}
+         """.stripMargin
+        SQL(query).as(dALManager.task.parser.*).foreach(t => {
+          dALManager.task.matchToOSMChangeSet(t, User.superUser)
+        })
+      }
+    }
+  }
+
+  /**
+    * Task that manually matches the OSM changesets to tasks
+    *
+    * @param str
+    */
+  def findChangeSets(str: String) : Unit = {
+    if (config.osmMatcherManualOnly) {
+      val values = str.split("=")
+      if (values.size == 2) {
+        implicit val id = values(1).toLong
+        values(0) match {
+          case "p" =>
+            dALManager.project.listChildren(-1).foreach(c => {
+              dALManager.challenge.listChildren(-1)(c.id).filter(_.status == Task.STATUS_FIXED).foreach(t =>
+                dALManager.task.matchToOSMChangeSet(t, User.superUser, false)
+              )
+            })
+          case "c" =>
+            dALManager.challenge.listChildren(-1).foreach(t => {
+              dALManager.task.matchToOSMChangeSet(t, User.superUser, false)
+            })
+          case "t" =>
+            dALManager.task.retrieveById match {
+              case Some(t) => dALManager.task.matchToOSMChangeSet(t, User.superUser, false)
+              case None =>
+            }
+          case _ => // Do nothing because there is nothing to do
+        }
+      }
+    }
+  }
+
+  def cleanDeleted(action:String) : Unit = {
+    Logger.info(action)
+    db.withConnection { implicit c =>
+      val deletedProjects = SQL"DELETE FROM projects WHERE deleted = true RETURNING id".as(SqlParser.int("id").*)
+      if (deletedProjects.nonEmpty) {
+        Logger.debug(s"Finalized deletion of projects with id [${deletedProjects.mkString(",")}]")
+      }
+      val deletedChallenges = SQL"DELETE FROM challenges WHERE deleted = true RETURNING id".as(SqlParser.int("id").*)
+      if (deletedChallenges.nonEmpty) {
+        Logger.debug(s"Finalized deletion of challenges with id [${deletedChallenges.mkString(",")}]")
       }
     }
   }

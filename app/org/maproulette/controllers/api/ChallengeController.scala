@@ -2,22 +2,31 @@
 // Licensed under the Apache License, Version 2.0 (see LICENSE).
 package org.maproulette.controllers.api
 
+import java.io._
 import java.sql.Connection
+import java.util.zip.{ZipEntry, ZipOutputStream}
 import javax.inject.Inject
 
 import akka.util.ByteString
+import oauth.signpost.exception.OAuthNotAuthorizedException
 import org.apache.commons.lang3.StringUtils
 import org.maproulette.actions._
 import org.maproulette.controllers.ParentController
-import org.maproulette.exception.{NotFoundException, StatusMessage}
+import org.maproulette.data.{ActionSummary, ChallengeSummary}
+import org.maproulette.exception.{MPExceptionUtil, NotFoundException, StatusMessage}
 import org.maproulette.models.dal._
 import org.maproulette.models._
+import org.maproulette.permissions.Permission
 import org.maproulette.services.ChallengeService
 import org.maproulette.session.{SearchParameters, SessionManager, User}
 import org.maproulette.utils.Utils
 import play.api.http.HttpEntity
 import play.api.libs.json._
-import play.api.mvc.{Action, AnyContent, ResponseHeader, Result}
+import play.api.libs.ws.WSClient
+import play.api.mvc._
+
+import scala.concurrent.{Future, Promise}
+import scala.util.{Failure, Success}
 
 /**
   * The challenge controller handles all operations for the Challenge objects.
@@ -33,8 +42,12 @@ class ChallengeController @Inject()(override val childController: TaskController
                                     override val dal: ChallengeDAL,
                                     dalManager: DALManager,
                                     override val tagDAL: TagDAL,
-                                    challengeService: ChallengeService)
+                                    challengeService: ChallengeService,
+                                    wsClient:WSClient,
+                                    permission:Permission)
   extends ParentController[Challenge, Task] with TagsMixin[Challenge] {
+
+  import scala.concurrent.ExecutionContext.Implicits.global
 
   // json reads for automatically reading Challenges from a posted json body
   override implicit val tReads: Reads[Challenge] = Challenge.reads.challengeReads
@@ -51,7 +64,6 @@ class ChallengeController @Inject()(override val childController: TaskController
 
   override def dalWithTags: TagDALMixin[Challenge] = dal
 
-
   /**
     * Classes can override this function to inject values into the object before it is sent along
     * with the response
@@ -59,7 +71,7 @@ class ChallengeController @Inject()(override val childController: TaskController
     * @param obj the object being sent in the response
     * @return A Json representation of the object
     */
-  override def inject(obj: Challenge) = {
+  override def inject(obj: Challenge)(implicit request:Request[Any]) = {
     val tags = tagDAL.listByChallenge(obj.id)
     val withTagsJson = Utils.insertIntoJson(Json.toJson(obj), Tag.KEY, Json.toJson(tags.map(_.name)))
     obj.general.challengeType match {
@@ -81,6 +93,7 @@ class ChallengeController @Inject()(override val childController: TaskController
     var jsonBody = super.updateCreateBody(body, user)
     jsonBody = Utils.insertIntoJson(jsonBody, "owner", user.osmProfile.id, true)(LongWrites)
     jsonBody = Utils.insertIntoJson(jsonBody, "enabled", true)(BooleanWrites)
+    jsonBody = Utils.insertIntoJson(jsonBody, "deleted", false)(BooleanWrites)
     jsonBody = Utils.insertIntoJson(jsonBody, "challengeType", Actions.ITEM_TYPE_CHALLENGE)(IntWrites)
     jsonBody = Utils.insertIntoJson(jsonBody, "difficulty", Challenge.DIFFICULTY_NORMAL)(IntWrites)
     jsonBody = Utils.insertIntoJson(jsonBody, "featured", false)(BooleanWrites)
@@ -152,7 +165,7 @@ class ChallengeController @Inject()(override val childController: TaskController
     }
   }
 
-  def getClusteredPoints(challengeId: Long, statusFilter: String): Action[AnyContent] = Action.async { implicit request =>
+  def getClusteredPoints(challengeId: Long, statusFilter: String, limit:Int): Action[AnyContent] = Action.async { implicit request =>
     this.sessionManager.userAwareRequest { implicit user =>
       implicit val writes = ClusteredPoint.clusteredPointWrites
       val filter = if (StringUtils.isEmpty(statusFilter)) {
@@ -160,7 +173,7 @@ class ChallengeController @Inject()(override val childController: TaskController
       } else {
         Some(Utils.split(statusFilter).map(_.toInt))
       }
-      Ok(Json.toJson(this.dal.getClusteredPoints(challengeId, filter)))
+      Ok(Json.toJson(this.dal.getClusteredPoints(challengeId, filter, limit)))
     }
   }
 
@@ -177,7 +190,7 @@ class ChallengeController @Inject()(override val childController: TaskController
     this.sessionManager.userAwareRequest { implicit user =>
       SearchParameters.withSearch { p =>
         val params = p.copy(
-          challengeId = Some(challengeId),
+          challengeIds = Some(List(challengeId)),
           taskSearch = Some(taskSearch),
           taskTags = Some(Utils.split(tags))
         )
@@ -202,7 +215,7 @@ class ChallengeController @Inject()(override val childController: TaskController
     this.sessionManager.userAwareRequest { implicit user =>
       SearchParameters.withSearch { p =>
         val params = p.copy(
-          challengeId = Some(challengeId),
+          challengeIds = Some(List(challengeId)),
           taskSearch = Some(taskSearch),
           taskTags = Some(Utils.split(tags))
         )
@@ -323,18 +336,21 @@ class ChallengeController @Inject()(override val childController: TaskController
     */
   def extractComments(challengeId:Long, limit:Int, page:Int) : Action[AnyContent] = Action.async { implicit request =>
     this.sessionManager.authenticatedRequest { implicit user =>
-      val comments = this.dalManager.task.retrieveCommentsForChallenge(challengeId, limit, page)
-      val urlPrefix = s"http://${request.host}/"
-      val csv = comments.flatMap(c =>
-        c._2.map(comment =>
-          s"""$challengeId,${c._1},${comment.osm_id},${comment.osm_username},"${comment.comment}",${urlPrefix}map/$challengeId/${c._1}"""
-        )
-      )
       Result(
         header = ResponseHeader(OK, Map.empty),
-        body = HttpEntity.Strict(ByteString(csv.mkString("\n")), Some("text/csv"))
+        body = HttpEntity.Strict(ByteString(_extractComments(challengeId, limit, page, request.host).mkString("\n")), Some("text/csv"))
       )
     }
+  }
+
+  private def _extractComments(challengeId:Long, limit:Int, page:Int, host:String) : Seq[String] = {
+    val comments = this.dalManager.task.retrieveCommentsForChallenge(challengeId, limit, page)
+    val urlPrefix = s"http://$host/"
+    comments.flatMap(c =>
+      c._2.map(comment =>
+        s"""$challengeId,${c._1},${comment.osm_id},${comment.osm_username},"${comment.comment}",${urlPrefix}map/$challengeId/${c._1}"""
+      )
+    ).toSeq
   }
 
   /**
@@ -360,6 +376,178 @@ class ChallengeController @Inject()(override val childController: TaskController
           }
           Ok(Json.toJson(jsonList))
         }
+      }
+    }
+  }
+
+  /**
+    * Matches all the tasks to their specific changesets
+    *
+    * @param challengeId The challenge id
+    * @param skipSet Whether to skip tasks that have already been set
+    * @return Just a 200 OK
+    */
+  def matchChangeSets(challengeId:Long, skipSet:Boolean) : Action[AnyContent] = Action.async { implicit request =>
+    this.sessionManager.authenticatedRequest { implicit user =>
+      val challenge = this.dal.retrieveById(challengeId)
+      challenge match {
+        case Some(c) if user.isSuperUser || c.general.owner == user.osmProfile.id =>
+          // TODO might need to loop through the tasks in batches. Pulling every single task could be very expensive
+          this.dal.listChildren(-1)(challengeId)
+            .filter(t => t.status.get == Task.STATUS_FIXED && (!skipSet || t.changesetId.isEmpty || t.changesetId.get != -1))
+            .foreach(t => {
+              this.dalManager.task.matchToOSMChangeSet(t, user, false)
+            })
+          // todo might need to respond only once everything has updated or handle this better
+          Ok
+        case Some(_) => throw new OAuthNotAuthorizedException("Only owners of the challenge or super users can make this request")
+        case _ => throw new NotFoundException(s"Challenge with id $challengeId not found")
+      }
+    }
+  }
+
+  /**
+    * Creates or updates a challenge directly from Github. It uses the following files:
+    * ${name}_create.json - The json file containing all the information to generate the file
+    * ${name}_geojson.json - The geojson used to build the challenge tasks, can be used to update later
+    * ${name}_info.md - An information file that will be used to display information about the challenge
+    *
+    * @param projectId The project that you are building the challenge under
+    * @param username The github username of where the challenge information exists
+    * @param repo The repo that the challenge information exists in
+    * @param name The name of the challenge files.
+    * @return A response with the newly created challenge
+    */
+  def createFromGithub(projectId:Long, username:String, repo:String, name:String, rebuild:Boolean) : Action[AnyContent] = Action.async { implicit request =>
+    this.sessionManager.authenticatedFutureRequest { implicit user =>
+      val result = Promise[Result]
+      val baseURL = s"https://raw.githubusercontent.com/$username/$repo/master/${name}_";
+      this.wsClient.url(s"${baseURL}create.json").get onComplete {
+        case Success(response) =>
+          this.wsClient.url(s"${baseURL}geojson.json").get onComplete {
+            case Success(jsonResp) =>
+              try {
+                // inject the info link into the challenge
+                val challengeJson = Utils.insertIntoJson(
+                  Utils.insertIntoJson(response.json, "infoLink", s"${baseURL}info.md", false),
+                  "localGeoJSON",
+                  jsonResp.json,
+                  true
+                )
+                val challengeName = (challengeJson \ "name").asOpt[String].getOrElse(name)
+                // look for the challenge, if the name exists we will attempt to update the challenge
+                val challengeID = this.dal.retrieveByName(challengeName, projectId) match {
+                  case Some(c) => c.id
+                  case None => -1
+                }
+                val updatedBody = this.updateCreateBody(Utils.insertIntoJson(challengeJson, "parent", projectId), user)
+                if (challengeID > 0) {
+                  // if rebuild set to true, remove all the tasks first from the challenge before recreating them
+                  this.dal.deleteTasks(user, challengeID)
+                  // if you provide the ID in the post method we will send you to the update path
+                  this.internalUpdate(updatedBody, user)(challengeID.toString, -1) match {
+                    case Some(value) => result success Ok(this.inject(value))
+                    case None => result success NotModified
+                  }
+                } else {
+                  this.internalCreate(updatedBody, updatedBody.validate[Challenge].get, user) match {
+                    case Some(value) => result success Ok(this.inject(value))
+                    case None => result success NotModified
+                  }
+                }
+              } catch {
+                case e:Throwable => result success MPExceptionUtil.manageException(e)
+              }
+            case Failure(error) => throw error
+          }
+        case Failure(error) => throw error
+      }
+      result.future
+    }
+  }
+
+  /**
+    * Creates a challenge gzipped package that contains the JSON to recreate the challenge, geojson to
+    * recreate all the tasks, challenge info md file, metrics file at the time this function is executed,
+    * and all comments that have currently been made against tasks in this challenge.
+    *
+    * @param challengeId The id of the challenge to extract
+    * @return The
+    */
+  def extractPackage(challengeId:Long) : Action[AnyContent] = Action.async { implicit request =>
+    this.sessionManager.authenticatedFutureRequest { implicit user =>
+      this.dal.retrieveById(challengeId) match {
+        case Some(c) =>
+          implicit val actionSummaryWrites = Json.writes[ActionSummary]
+          implicit val challengeSummaryWrites = Json.writes[ChallengeSummary]
+          val files:Map[String, String] = Map(
+            "challenge.json" -> Json.prettyPrint(Json.toJson(c)),
+            "geometry.geojson" -> this.dal.getChallengeGeometry(challengeId),
+            "comments.csv" -> this._extractComments(challengeId, -1, 0, request.host).mkString("\n"),
+            "metrics.csv" -> Json.prettyPrint(Json.toJson(this.dalManager.data.getChallengeSummary(challengeId = Some(challengeId))))
+          )
+          val out = new ByteArrayOutputStream()
+
+          val zip = new ZipOutputStream(out)
+          files.foreach { f =>
+            zip.putNextEntry(new ZipEntry(f._1))
+            val in = new BufferedInputStream(new ByteArrayInputStream(f._2.getBytes))
+            var b = in.read
+            while (b > -1) {
+              zip.write(b)
+              b = in.read
+            }
+            in.close()
+            zip.closeEntry()
+          }
+          zip.close()
+          val response = ByteString(out.toByteArray)
+          out.close()
+          Future {
+            Result(
+              header = ResponseHeader(OK, Map.empty),
+              body = HttpEntity.Strict(response, Some("application/gzip"))
+            )
+          }
+        case None => Future { NotFound }
+      }
+    }
+  }
+
+  /**
+    * Clones a challenge with a new name
+    *
+    * @param itemId The item id of the challenge you want to clone
+    * @param newName The new name of the cloned challenge
+    * @return The newly created cloned challenge
+    */
+  def cloneChallenge(itemId:Long, newName:String) : Action[AnyContent] = Action.async { implicit request =>
+    sessionManager.authenticatedRequest { implicit user =>
+      dalManager.challenge.retrieveById(itemId) match {
+        case Some(c) =>
+          permission.hasWriteAccess(ProjectType(), user)(c.general.parent)
+          val clonedChallenge = c.copy(id = -1, name = newName)
+          Ok(Json.toJson(this.dal.insert(clonedChallenge, user)))
+        case None =>
+          throw new NotFoundException(s"No challenge found to clone matching the given id [$itemId]")
+      }
+    }
+  }
+
+  /**
+    * Rebuilds a challenge if it uses a remote geojson or overpass query to generate it's tasks
+    *
+    * @param challengeId The id of the challenge
+    * @return A 200 status OK
+    */
+  def rebuildChallenge(challengeId:Long) : Action[AnyContent] = Action.async { implicit request =>
+    sessionManager.authenticatedRequest { implicit user =>
+      dalManager.challenge.retrieveById(challengeId) match {
+        case Some(c) =>
+          permission.hasWriteAccess(ProjectType(), user)(c.general.parent)
+          challengeService.rebuildChallengeTasks(user, c)
+          Ok
+        case None => throw new NotFoundException(s"No challenge found with id $challengeId")
       }
     }
   }

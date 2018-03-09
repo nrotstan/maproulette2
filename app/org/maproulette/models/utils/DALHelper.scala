@@ -214,8 +214,8 @@ trait DALHelper {
     val parameters = new ListBuffer[NamedParameter]()
 
     if (!projectSearch) {
-      params.projectId match {
-        case Some(pid) if pid > -1 => whereClause ++= s"$challengePrefix.parent_id = $pid"
+      params.getProjectIds match {
+        case Some(p) if p.nonEmpty => whereClause ++= s"$challengePrefix.parent_id IN (${p.mkString(",")})"
         case _ =>
           params.projectSearch match {
             case Some(ps) if ps.nonEmpty =>
@@ -233,8 +233,8 @@ trait DALHelper {
       }
     }
 
-    params.challengeId match {
-      case Some(cid) if cid > -1 => this.appendInWhereClause(whereClause, s"$challengePrefix.id = $cid")
+    params.getChallengeIds match {
+      case Some(c) if c.nonEmpty => this.appendInWhereClause(whereClause, s"$challengePrefix.id IN (${c.mkString(",")})")
       case _ =>
         params.challengeSearch match {
           case Some(cs) if cs.nonEmpty =>

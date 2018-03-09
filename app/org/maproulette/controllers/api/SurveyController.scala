@@ -8,11 +8,13 @@ import org.maproulette.actions._
 import org.maproulette.exception.NotFoundException
 import org.maproulette.models.{Answer, Challenge, Task}
 import org.maproulette.models.dal._
+import org.maproulette.permissions.Permission
 import org.maproulette.services.ChallengeService
 import org.maproulette.session.{SessionManager, User}
 import org.maproulette.utils.Utils
 import play.api.libs.json._
-import play.api.mvc.{Action, AnyContent}
+import play.api.libs.ws.WSClient
+import play.api.mvc.{Action, AnyContent, Request}
 
 /**
   * The survey controller handles all operations for the Survey objects.
@@ -28,8 +30,10 @@ class SurveyController @Inject() (override val childController:TaskController,
                                   override val dal: SurveyDAL,
                                   dalManager: DALManager,
                                   override val tagDAL: TagDAL,
-                                  challengeService: ChallengeService)
-  extends ChallengeController(childController, sessionManager, actionManager, dalManager.challenge, dalManager, tagDAL, challengeService) {
+                                  challengeService: ChallengeService,
+                                  wsClient: WSClient,
+                                  permission:Permission)
+  extends ChallengeController(childController, sessionManager, actionManager, dalManager.challenge, dalManager, tagDAL, challengeService, wsClient, permission) {
 
   // The type of object that this controller deals with.
   override implicit val itemType = SurveyType()
@@ -41,7 +45,7 @@ class SurveyController @Inject() (override val childController:TaskController,
     * @param obj the object being sent in the response
     * @return A Json representation of the object
     */
-  override def inject(obj: Challenge) = {
+  override def inject(obj: Challenge)(implicit request:Request[Any]) = {
     val json = super.inject(obj)
     // if no answers provided with Challenge, then provide the default answers
     val answers = this.dalManager.survey.getAnswers(obj.id) match {
