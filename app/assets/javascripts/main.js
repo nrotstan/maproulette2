@@ -422,9 +422,9 @@ var deleteItem = function(itemType, itemId) {
 
     ToastUtils.Info(Messages('main.js.deletion') + " " + itemType + " [" + itemId + "]");
     if (itemType == "Project") {
-        jsRoutes.org.maproulette.controllers.api.ProjectController.delete(itemId).ajax(apiCallback);
+        jsRoutes.org.maproulette.controllers.api.ProjectController.delete(itemId, true).ajax(apiCallback);
     } else if (itemType == "Challenge") {
-        jsRoutes.org.maproulette.controllers.api.ChallengeController.delete(itemId).ajax(apiCallback);
+        jsRoutes.org.maproulette.controllers.api.ChallengeController.delete(itemId, true).ajax(apiCallback);
     } else if (itemType == "Task") {
         jsRoutes.org.maproulette.controllers.api.TaskController.delete(itemId).ajax(apiCallback);
     } else if (itemType == "User") {

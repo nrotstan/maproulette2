@@ -130,4 +130,16 @@ class ProjectController @Inject() (override val childController:ChallengeControl
       Ok(Json.toJson(this.dal.getClusteredPoints(pid, cids)))
     }
   }
+
+  /**
+    * Retrieve all the comments for a specific project
+    *
+    * @param projectId The id of the challenge
+    * @return A list of comments that exist for a specific challenge
+    */
+  def retrieveComments(projectId:Long, limit:Int, page:Int) : Action[AnyContent] = Action.async { implicit request =>
+    this.sessionManager.authenticatedRequest { implicit user =>
+      Ok(Json.toJson(this.taskDAL.retrieveComments(List(projectId), List.empty, List.empty, limit, page)))
+    }
+  }
 }

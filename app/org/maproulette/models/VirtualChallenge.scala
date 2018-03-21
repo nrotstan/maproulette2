@@ -15,7 +15,8 @@ case class VirtualChallenge(override val id:Long,
                             override val description:Option[String]=None,
                             ownerId:Long,
                             searchParameters:SearchParameters,
-                            expiry:DateTime) extends BaseObject[Long] with DefaultWrites {
+                            expiry:DateTime,
+                            taskIdList:Option[List[Long]]=None) extends BaseObject[Long] with DefaultWrites {
 
   override val itemType: ItemType = VirtualChallengeType()
 

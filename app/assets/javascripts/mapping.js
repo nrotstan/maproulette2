@@ -582,7 +582,7 @@ function Task() {
             proximityID = data.id;
         }
         // make sure the the challenge is set
-        new SearchParameters().setChallengeId(data.parentId);
+        new SearchParameters().setChallengeId([data.parentId]);
         taskFunction(proximityID).ajax({
             success:function(update) {
                 updateData(update, MRManager.getSuccessHandler(success));
@@ -1027,14 +1027,14 @@ var MRManager = (function() {
             }
             // if we are mapping directly using the challenge ID, then ignore whether it is enabled or not
             else if (typeof parentId !== 'undefined' && parentId != -1) {
-                currentSearchParameters.setChallengeId(parentId);
+                currentSearchParameters.setChallengeId([parentId]);
                 currentSearchParameters.setProjectEnabled(false);
                 currentSearchParameters.setChallengeEnabled(false);
                 currentTask.getRandomNextTask();
             } else {
                 // In this case show all the challenges on the map
                 loading();
-                currentSearchParameters.setChallengeId(-1);
+                currentSearchParameters.setChallengeId([-1]);
                 currentSearchParameters.setProjectEnabled(true);
                 currentSearchParameters.setChallengeEnabled(true);
                 jsRoutes.org.maproulette.controllers.api.ProjectController.getClusteredPoints(-1).ajax({

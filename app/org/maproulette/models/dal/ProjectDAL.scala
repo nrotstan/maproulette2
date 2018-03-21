@@ -89,7 +89,8 @@ class ProjectDAL @Inject() (override val db:Database,
     * @return The object that was inserted into the database. This will include the newly created id
     */
   override def insert(project: Project, user:User)(implicit c:Option[Connection]=None): Project = {
-    this.permission.hasObjectWriteAccess(project, user)
+    //permissions don't need to be checked, anyone can create a project
+    //this.permission.hasObjectWriteAccess(project, user)
     this.cacheManager.withOptionCaching { () =>
       // only super users can enable or disable projects
       val setProject = if (!user.isSuperUser || user.adminForProject(project.id)) {

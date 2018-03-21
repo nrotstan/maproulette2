@@ -71,6 +71,7 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
       get[Option[String]]("challenges.overpass_ql") ~
       get[Option[String]]("challenges.remote_geo_json") ~
       get[Option[Int]]("challenges.status") ~
+      get[Option[String]]("challenges.status_message") ~
       get[Int]("challenges.default_priority") ~
       get[Option[String]]("challenges.high_priority_rule") ~
       get[Option[String]]("challenges.medium_priority_rule") ~
@@ -86,7 +87,7 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
       get[Boolean]("deleted") map {
       case id ~ name ~ created ~ modified ~ description ~ infoLink ~ ownerId ~ parentId ~ instruction ~
         difficulty ~ blurb ~ enabled ~ challenge_type ~ featured ~ checkin_comment ~ overpassql ~ remoteGeoJson ~
-        status ~ defaultPriority ~ highPriorityRule ~ mediumPriorityRule ~ lowPriorityRule ~
+        status ~ statusMessage ~ defaultPriority ~ highPriorityRule ~ mediumPriorityRule ~ lowPriorityRule ~
         defaultZoom ~ minZoom ~ maxZoom ~ defaultBasemap ~ customBasemap ~ updateTasks ~ location ~ bounding ~ deleted =>
         val hpr = highPriorityRule match {
           case Some(c) if StringUtils.isEmpty(c) || StringUtils.equals(c, "{}") => None
@@ -105,7 +106,7 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
           ChallengeCreation(overpassql, remoteGeoJson),
           ChallengePriority(defaultPriority, hpr, mpr, lpr),
           ChallengeExtra(defaultZoom, minZoom, maxZoom, defaultBasemap, customBasemap, updateTasks),
-          status, location, bounding
+          status, statusMessage, location, bounding
         )
     }
   }
@@ -153,15 +154,15 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
       this.withMRTransaction { implicit c =>
         SQL"""INSERT INTO challenges (name, owner_id, parent_id, difficulty, description, info_link, blurb,
                                       instruction, enabled, challenge_type, featured, checkin_comment,
-                                      overpass_ql, remote_geo_json, status, default_priority, high_priority_rule,
+                                      overpass_ql, remote_geo_json, status, status_message, default_priority, high_priority_rule,
                                       medium_priority_rule, low_priority_rule, default_zoom, min_zoom,
                                       max_zoom, default_basemap, custom_basemap, updatetasks)
               VALUES (${challenge.name}, ${challenge.general.owner}, ${challenge.general.parent}, ${challenge.general.difficulty},
                       ${challenge.description}, ${challenge.infoLink}, ${challenge.general.blurb}, ${challenge.general.instruction},
                       ${challenge.general.enabled}, ${challenge.general.challengeType}, ${challenge.general.featured},
                       ${challenge.general.checkinComment}, ${challenge.creation.overpassQL}, ${challenge.creation.remoteGeoJson}, ${challenge.status},
-                      ${challenge.priority.defaultPriority}, ${challenge.priority.highPriorityRule}, ${challenge.priority.mediumPriorityRule},
-                      ${challenge.priority.lowPriorityRule}, ${challenge.extra.defaultZoom}, ${challenge.extra.minZoom},
+                      ${challenge.statusMessage}, ${challenge.priority.defaultPriority}, ${challenge.priority.highPriorityRule},
+                      ${challenge.priority.mediumPriorityRule}, ${challenge.priority.lowPriorityRule}, ${challenge.extra.defaultZoom}, ${challenge.extra.minZoom},
                       ${challenge.extra.maxZoom}, ${challenge.extra.defaultBasemap}, ${challenge.extra.customBasemap}, ${challenge.extra.updateTasks}
                       ) ON CONFLICT(parent_id, LOWER(name)) DO NOTHING RETURNING #${this.retrieveColumns}""".as(this.parser.*).headOption
       }
@@ -210,7 +211,8 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
         val checkinComment = (updates \ "checkinComment").asOpt[String].getOrElse(cachedItem.general.checkinComment)
         val overpassQL = (updates \ "overpassQL").asOpt[String].getOrElse(cachedItem.creation.overpassQL.getOrElse(""))
         val remoteGeoJson = (updates \ "remoteGeoJson").asOpt[String].getOrElse(cachedItem.creation.remoteGeoJson.getOrElse(""))
-        val overpassStatus = (updates \ "status").asOpt[Int].getOrElse(cachedItem.status.getOrElse(Challenge.STATUS_NA))
+        val status = (updates \ "status").asOpt[Int].getOrElse(cachedItem.status.getOrElse(Challenge.STATUS_NA))
+        val statusMessage = (updates \ "statusMessage").asOpt[String].getOrElse(cachedItem.statusMessage.getOrElse(""))
         val defaultPriority = (updates \ "defaultPriority").asOpt[Int].getOrElse(cachedItem.priority.defaultPriority)
         // if any of the priority rules have changed then we need to run the update priorities task
         if (!StringUtils.equalsIgnoreCase(highPriorityRule, cachedItem.priority.highPriorityRule.getOrElse("")) ||
@@ -229,7 +231,7 @@ class ChallengeDAL @Inject() (override val db:Database, taskDAL: TaskDAL,
         SQL"""UPDATE challenges SET name = $name, owner_id = $ownerId, parent_id = $parentId, difficulty = $difficulty,
                 description = $description, info_link = $infoLink, blurb = $blurb, instruction = $instruction,
                 enabled = $enabled, featured = $featured, checkin_comment = $checkinComment, overpass_ql = $overpassQL,
-                remote_geo_json = $remoteGeoJson, status = $overpassStatus, default_priority = $defaultPriority,
+                remote_geo_json = $remoteGeoJson, status = $status, status_message = $statusMessage, default_priority = $defaultPriority,
                 high_priority_rule = ${if (StringUtils.isEmpty(highPriorityRule)) { Option.empty[String] } else { Some(highPriorityRule) }},
                 medium_priority_rule = ${if (StringUtils.isEmpty(mediumPriorityRule)) { Option.empty[String] } else { Some(mediumPriorityRule) }},
                 low_priority_rule = ${if (StringUtils.isEmpty(lowPriorityRule)) { Option.empty[String] } else { Some(lowPriorityRule) }},

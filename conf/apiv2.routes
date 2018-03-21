@@ -515,6 +515,30 @@ GET     /project/clustered/:id                      @org.maproulette.controllers
 ###
 GET     /project/search/clustered                   @org.maproulette.controllers.api.ProjectController.getSearchedClusteredPoints(search ?= "")
 ###
+# tags: [ Project ]
+# summary: Retrieve all comments for Project
+# description: This will retrieve all the comments of the descendent tasks of a given Project
+# response:
+#   '200':
+#     description: A list of comments of the descendent tasks of a given Project
+#     schema:
+#       $ref: '#/definitions/org.maproulette.models.Comment'
+#   '404':
+#     description: No Project with provided ID found
+# parameters:
+#   - name: id
+#     in: path
+#     description: The ID of the project
+#     required: true
+#   - name: limit
+#     in: query
+#     description: Limit the number of results returned in the response. Default value is 10.
+#   - name: page
+#     in: query
+#     description: Used in conjunction with the limit parameter to page through X number of responses. Default value is 0, ie. first page.
+###
+GET     /project/:id/comments                     @org.maproulette.controllers.api.ProjectController.retrieveComments(id:Long, limit:Int ?= 10, page:Int ?= 0)
+###
 # tags: [ Challenge ]
 # summary: Create a Challenge
 # consumes: [ application/json ]
@@ -1040,6 +1064,63 @@ POST    /challenge/:id/tasks                        @org.maproulette.controllers
 PUT     /challenge/:id/tasks                        @org.maproulette.controllers.api.ChallengeController.updateChildren(id:Long)
 ###
 # tags: [ Challenge ]
+# summary: Add tasks to a challenge
+# consumes: [ application/json ]
+# description: This will create tasks within a challenge based on the provided geojson in the body of the PUT request
+# responses:
+#   '304':
+#     description: No Content, just a successful creation when getting this message
+#   '400':
+#     description: Invalid json payload. It is required that the body is JSON.
+#   '401':
+#     description: The user is not authorized to make this request
+# parameters:
+#   - name: id
+#     in: path
+#     description: The id of the parent Challenge where all the children are being created.
+#   - name: apiKey
+#     in: header
+#     description: The user's apiKey to authorize the request
+#     required: true
+#     type: string
+#   - name: body
+#     in: body
+#     description: The geojson to build the tasks from.
+#     required: true
+###
+PUT     /challenge/:id/addTasks                     @org.maproulette.controllers.api.ChallengeController.addTasksToChallenge(id:Long)
+###
+# tags: [ Challenge ]
+# summary: Add tasks to a challenge
+# consumes: [ application/json ]
+# description: This will create tasks within a challenge based on the provided file uploaded as part of the PUT request.
+# responses:
+#   '304':
+#     description: No Content, just a successful creation when getting this message
+#   '400':
+#     description: Invalid json payload. It is required that the file is JSON.
+#   '401':
+#     description: The user is not authorized to make this request
+# parameters:
+#   - name: id
+#     in: path
+#     description: The id of the parent Challenge where all the children are being created.
+#   - name: lineByLine
+#     in: query
+#     description: If the JSON provided includes seperate GeoJSON on each line, then this must be true
+#   - name: apiKey
+#     in: header
+#     description: The user's apiKey to authorize the request
+#     required: true
+#     type: string
+#   - name: body
+#     in: body
+#     description: The geojson to build the tasks from.
+#     required: true
+###
+PUT     /challenge/:id/addFileTasks                 @org.maproulette.controllers.api.ChallengeController.addTasksToChallengeFromFile(id:Long, lineByLine:Boolean ?= true)
+###
+# tags: [ Challenge ]
 # summary: Retrieves children for Challenge
 # produces: [ application/json ]
 # description: Retrieves all the children for a Challenge in an expanded list. Unlike the GET
@@ -1306,7 +1387,7 @@ PUT     /challenge/:id/resetTaskInstructions        @org.maproulette.controllers
 # description: This will retrieve all the comments for all the children tasks of a given challenge
 # response:
 #   '200':
-#     description: A mapping of Task ID to list of comments for that Task ID
+#     description: A list of comments for that challenge
 #     schema:
 #       $ref: '#/definitions/org.maproulette.models.Comment'
 #   '404':

@@ -30,9 +30,9 @@ class ChallengeService @Inject() (challengeDAL: ChallengeDAL, taskDAL: TaskDAL,
                                   config:Config, ws:WSClient, db:Database) extends DefaultReads {
   import scala.concurrent.ExecutionContext.Implicits.global
 
-  def rebuildChallengeTasks(user:User, challenge:Challenge) : Boolean = this.buildChallengeTasks(user, challenge)
+  def rebuildTasks(user:User, challenge:Challenge) : Boolean = this.buildTasks(user, challenge)
 
-  def buildChallengeTasks(user:User, challenge:Challenge, json:Option[String]=None) : Boolean = {
+  def buildTasks(user:User, challenge:Challenge, json:Option[String]=None) : Boolean = {
     if (!challenge.creation.overpassQL.getOrElse("").isEmpty) {
       this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_BUILDING), user)(challenge.id)
       Future {
@@ -43,10 +43,27 @@ class ChallengeService @Inject() (challengeDAL: ChallengeDAL, taskDAL: TaskDAL,
     } else {
       val usingLocalJson = json match {
         case Some(value) if StringUtils.isNotEmpty(value) =>
+          val splitJson = value.split("\n")
           this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_BUILDING), user)(challenge.id)
           Future {
-            Logger.debug("Creating tasks from local GeoJSON file")
-            this.createTasksFromFeatures(user, challenge, Json.parse(value))
+            if (isLineByLineGeoJson(splitJson)) {
+              val failedLines = splitJson.zipWithIndex.flatMap(line => {
+                try {
+                  this.createNewTask(user, UUID.randomUUID().toString, challenge, Json.parse(line._1))
+                  None
+                } catch {
+                  case e:Exception =>
+                    Some(line._2)
+                }
+              })
+              if (failedLines.nonEmpty) {
+                this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_PARTIALLY_LOADED, "statusMessage" -> s"GeoJSON lines [${failedLines.mkString(",")}] failed to parse"), user)(challenge.id)
+              } else {
+                this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_COMPLETE), user)(challenge.id)
+              }
+            } else {
+              this.createTasksFromJson(user, challenge, value)
+            }
           }
           true
         case _ => false
@@ -55,14 +72,7 @@ class ChallengeService @Inject() (challengeDAL: ChallengeDAL, taskDAL: TaskDAL,
         // lastly try remote
         challenge.creation.remoteGeoJson match {
           case Some(url) if StringUtils.isNotEmpty(url) =>
-            this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_BUILDING), user)(challenge.id)
-            this.ws.url(url).withRequestTimeout(this.config.getOSMQLProvider.requestTimeout).get() onComplete {
-              case Success(resp) =>
-                Logger.debug("Creating tasks from remote GeoJSON file")
-                this.createTasksFromFeatures(user, challenge, Json.parse(resp.body))
-              case Failure(f) =>
-                this.challengeDAL.update(Json.obj("overpassStatus" -> Challenge.STATUS_FAILED), user)(challenge.id)
-            }
+            this.buildTasksFromRemoteJson(url, 1, challenge, user)
             true
           case _ => false
         }
@@ -72,10 +82,99 @@ class ChallengeService @Inject() (challengeDAL: ChallengeDAL, taskDAL: TaskDAL,
     }
   }
 
-  private def createTasksFromFeatures(user:User, parent:Challenge, jsonData:JsValue) = {
+  /**
+    * Create a single task from some provided GeoJSON. Unlike when creating multiple tasks, this
+    * will not create the tasks in a future
+    *
+    * @param user The user executing the task
+    * @param challenge The challenge to create the task under
+    * @param json The geojson for the task
+    * @return
+    */
+  def createTaskFromJson(user:User, challenge:Challenge, json:String) : Option[Task] = {
+    try {
+      this.createTasksFromFeatures(user, challenge, Json.parse(json), true).headOption
+    } catch {
+      case e:Exception =>
+        this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_FAILED, "statusMessage" -> e.getMessage), user)(challenge.id)
+        throw e
+    }
+
+  }
+
+  /**
+    * Create multiple tasks from some provided GeoJSON. It will execute the creation in a future
+    *
+    * @param user The user executing the task
+    * @param challenge The challenge to create the task under
+    * @param json The geojson for the task
+    * @return
+    */
+  def createTasksFromJson(user:User, challenge:Challenge, json:String) : List[Task] = {
+    try {
+      this.createTasksFromFeatures(user, challenge, Json.parse(json))
+    } catch {
+      case e: Exception =>
+        this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_FAILED, "statusMessage" -> e.getMessage), user)(challenge.id)
+        throw e
+    }
+  }
+
+  /**
+    * Builds all the tasks from the remote json, it will check for multiple files from the geojson.
+    *
+    * @param filePrefix The url or file prefix of the remote geojson
+    * @param fileNumber The current file number
+    * @param challenge The challenge to build the tasks in
+    * @param user The user creating the tasks
+    */
+  def buildTasksFromRemoteJson(filePrefix:String, fileNumber:Int, challenge:Challenge, user:User) : Unit = {
+    this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_BUILDING), user)(challenge.id)
+    val url = filePrefix.replace("{x}", fileNumber.toString)
+    val seqJSON = filePrefix.contains("{x}")
+    this.ws.url(url).withRequestTimeout(this.config.getOSMQLProvider.requestTimeout).get() onComplete {
+      case Success(resp) =>
+        Logger.debug("Creating tasks from remote GeoJSON file")
+        try {
+          val splitJson = resp.body.split("\n")
+          if (this.isLineByLineGeoJson(splitJson)) {
+            splitJson.foreach(line => this.createNewTask(user, UUID.randomUUID().toString, challenge, Json.parse(line)))
+            this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_COMPLETE), user)(challenge.id)
+          } else {
+            this.createTasksFromFeatures(user, challenge, Json.parse(resp.body))
+          }
+        } catch {
+          case e:Exception =>
+            this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_FAILED, "statusMessage" -> e.getMessage), user)(challenge.id)
+        }
+        if (seqJSON) {
+          this.buildTasksFromRemoteJson(filePrefix, fileNumber + 1, challenge, user)
+        } else {
+          this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_COMPLETE), user)(challenge.id)
+        }
+      case Failure(f) =>
+        if (fileNumber > 1) {
+          // todo need to figure out if actual failure or if not finding the next file
+          this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_COMPLETE), user)(challenge.id)
+        } else {
+          this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_FAILED, "StatusMessage" -> f.getMessage), user)(challenge.id)
+        }
+    }
+  }
+
+  /**
+    * Creates task(s) from a geojson file
+    *
+    * @param user The user executing the request
+    * @param parent The challenge where the task should be created
+    * @param jsonData The json data for the task
+    * @param single if true, then will use the json provided and create a single task
+    */
+  private def createTasksFromFeatures(user:User, parent:Challenge, jsonData:JsValue, single:Boolean=false) : List[Task] = {
+    this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_BUILDING), user)(parent.id)
     val featureList = (jsonData \ "features").as[List[JsValue]]
     try {
-      featureList.map { value =>
+      val createdTasks = featureList.flatMap { value =>
         val name = (value \ "id").asOpt[String] match {
           case Some(n) => n
           case None => (value \ "name").asOpt[String] match {
@@ -87,14 +186,28 @@ class ChallengeService @Inject() (challengeDAL: ChallengeDAL, taskDAL: TaskDAL,
               UUID.randomUUID().toString
           }
         }
-        this.createNewTask(user, name, parent, (value \ "geometry").as[JsObject], getProperties(value, "properties"))
+        if (!single) {
+          this.createNewTask(user, name, parent, (value \ "geometry").as[JsObject], getProperties(value, "properties"))
+        } else {
+          None
+        }
       }
-      this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_COMPLETE), user)(parent.id)
-      Logger.debug(s"${featureList.size} tasks created from json file.")
+      if (single) {
+        this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_COMPLETE), user)(parent.id)
+        this.createNewTask(user, UUID.randomUUID().toString, parent, jsonData) match {
+          case Some(t) => List(t)
+          case None => List.empty
+        }
+      } else {
+        this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_COMPLETE), user)(parent.id)
+        Logger.debug(s"${featureList.size} tasks created from json file.")
+        createdTasks
+      }
     } catch {
       case e:Exception =>
-        this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_FAILED), user)(parent.id)
+        this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_FAILED, "statusMessage" -> e.getMessage), user)(parent.id)
         Logger.error(s"${featureList.size} tasks failed to be created from json file.", e)
+        List.empty
     }
   }
 
@@ -105,6 +218,7 @@ class ChallengeService @Inject() (challengeDAL: ChallengeDAL, taskDAL: TaskDAL,
     * @param user The user executing the query
     */
   private def buildOverpassQLTasks(challenge:Challenge, user:User) = {
+    this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_BUILDING), user)(challenge.id)
     challenge.creation.overpassQL match {
       case Some(ql) if StringUtils.isNotEmpty(ql) =>
         // run the query and then create the tasks
@@ -160,19 +274,24 @@ class ChallengeService @Inject() (challengeDAL: ChallengeDAL, taskDAL: TaskDAL,
                 }
               }
             } else {
-              this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_FAILED), user)(challenge.id)
-              throw new InvalidException(s"Bad Request: ${result.body}")
+              this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_FAILED, "statusMessage" -> s"${result.statusText}:${result.body}"), user)(challenge.id)
+              throw new InvalidException(s"${result.statusText}: ${result.body}")
             }
           case Failure(f) =>
-            this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_FAILED), user)(challenge.id)
+            this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_FAILED, "statusMessage" -> f.getMessage), user)(challenge.id)
             throw f
         }
-      case None => // just ignore, we don't have to do anything if it wasn't set
+      case None =>
+        this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_FAILED, "statusMessage" -> "overpass query not set"), user)(challenge.id)
     }
   }
 
+  private def createNewTask(user:User, name:String, parent:Challenge, json:JsValue) : Option[Task] = {
+    this._createNewTask(user, name, parent, Task(-1, name, DateTime.now(), DateTime.now(), parent.id, Some(""), None, json.toString))
+  }
+
   private def createNewTask(user:User, name:String, parent:Challenge, geometry:JsObject,
-                            properties:JsValue) : Boolean = {
+                            properties:JsValue) : Option[Task] = {
     val newTask = Task(-1, name, DateTime.now(), DateTime.now(),
       parent.id,
       Some(""),
@@ -186,15 +305,17 @@ class ChallengeService @Inject() (challengeDAL: ChallengeDAL, taskDAL: TaskDAL,
         ))
       ).toString
     )
+    this._createNewTask(user, name, parent, newTask)
+  }
 
+  private def _createNewTask(user:User, name:String, parent:Challenge, newTask:Task) : Option[Task] = {
     try {
       this.taskDAL.mergeUpdate(newTask, user)(newTask.id)
-      true
     } catch {
       // this task could fail on unique key violation, we need to ignore them
       case e:Exception =>
         Logger.error(e.getMessage)
-        false
+        None
     }
   }
 
@@ -244,5 +365,10 @@ class ChallengeService @Inject() (challengeDAL: ChallengeDAL, taskDAL: TaskDAL,
         Json.toJson(updatedMap)
       case _ => Json.obj()
     }
+  }
+
+  private def isLineByLineGeoJson(splitJson:Array[String]) : Boolean = {
+    splitJson.length > 1 && splitJson(0).startsWith("{") && splitJson(0).endsWith("}") &&
+      splitJson(1).startsWith("{") && splitJson(1).endsWith("}")
   }
 }

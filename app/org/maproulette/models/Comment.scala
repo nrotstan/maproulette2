@@ -13,7 +13,9 @@ import play.api.libs.json.{Json, Reads, Writes}
 case class Comment(id:Long,
                    osm_id:Long,
                    osm_username:String,
-                   task_id:Long,
+                   taskId:Long,
+                   challengeId:Long,
+                   projectId:Long,
                    created:DateTime,
                    comment:String,
                    actionId:Option[Long]=None)

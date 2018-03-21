@@ -37,6 +37,7 @@ trait ChallengeWrites {
     JsPath.write[ChallengePriority] and
     JsPath.write[ChallengeExtra] and
     (JsPath \ "status").writeNullable[Int] and
+    (JsPath \ "statusMessage").writeNullable[String] and
     (JsPath \ "location").writeNullable[String](new jsonWrites("location")) and
     (JsPath \ "bounding").writeNullable[String](new jsonWrites("bounding"))
   )(unlift(Challenge.unapply))
@@ -61,6 +62,7 @@ trait ChallengeReads extends DefaultReads {
     JsPath.read[ChallengePriority] and
     JsPath.read[ChallengeExtra] and
     (JsPath \ "status").readNullable[Int] and
+    (JsPath \ "statusMessage").readNullable[String] and
     (JsPath \ "location").readNullable[String](new jsonReads("location")) and
     (JsPath \ "bounding").readNullable[String](new jsonReads("bounding"))
   )(Challenge.apply _)

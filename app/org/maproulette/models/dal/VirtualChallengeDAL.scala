@@ -64,23 +64,33 @@ class VirtualChallengeDAL @Inject() (override val db:Database,
         // check if any virtual challenges with the same name need to expire
         // calling the retrieve function will also remove any expired virtual challenges
         this.retrieveListByName(List(element.name))
-        element.searchParameters.location match {
-          case Some(box) if ((box.right - box.left) * (box.top - box.bottom)) < config.virtualChallengeLimit =>
-              val query = """INSERT INTO virtual_challenges (owner_id, name, description, search_parameters, expiry)
+        val validParameters = element.taskIdList match {
+          case Some(ids) => ids.nonEmpty
+          case None => element.searchParameters.location match {
+            case Some(box) if (box.right - box.left) * (box.top - box.bottom) < config.virtualChallengeLimit => true
+            case None => false
+          }
+        }
+
+        if (validParameters) {
+          val query = """INSERT INTO virtual_challenges (owner_id, name, description, search_parameters, expiry)
                              VALUES ({owner}, {name}, {description}, {parameters}, {expiry}::timestamp)
                              RETURNING *"""
-              val newChallenge = SQL(query).on(
-                'owner -> user.osmProfile.id,
-                'name -> element.name,
-                'description -> element.description,
-                'parameters -> Json.toJson(element.searchParameters).toString(),
-                'expiry -> ParameterValue.toParameterValue(String.valueOf(element.expiry))
-              ).as(this.parser.single)
-            c.commit()
-            this.rebuildVirtualChallenge(newChallenge.id, element.searchParameters, user)
-            Some(newChallenge)
-          case _ =>
-            throw new InvalidException(s"Bounding Box that has an area smaller than ${config.virtualChallengeLimit} required to create virtual challenge.")
+          val newChallenge = SQL(query).on(
+            'owner -> user.osmProfile.id,
+            'name -> element.name,
+            'description -> element.description,
+            'parameters -> Json.toJson(element.searchParameters).toString(),
+            'expiry -> ParameterValue.toParameterValue(String.valueOf(element.expiry))
+          ).as(this.parser.single)
+          c.commit()
+          element.taskIdList match {
+            case Some(ids) => this.createVirtualChallengeFromIds(newChallenge.id, ids)
+            case None => this.rebuildVirtualChallenge(newChallenge.id, element.searchParameters, user)
+          }
+          Some(newChallenge)
+        } else {
+          throw new InvalidException(s"Bounding Box that has an area smaller than ${config.virtualChallengeLimit} required to create virtual challenge.")
         }
       }
     }.get
@@ -142,6 +152,16 @@ class VirtualChallengeDAL @Inject() (override val db:Database,
          """.execute()
         c.commit()
       })
+    }
+  }
+
+  private def createVirtualChallengeFromIds(id:Long, idList:List[Long])(implicit c:Option[Connection]=None) : Unit = {
+    withMRTransaction { implicit c =>
+      val insertRows = idList.map(taskId => s"($taskId, $id)").mkString(",")
+      SQL"""
+         INSERT INTO virtual_challenge_tasks (task_id, virtual_challenge_id) VALUES #$insertRows
+      """.execute()
+      c.commit()
     }
   }
 

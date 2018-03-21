@@ -494,7 +494,7 @@ class UserDAL @Inject() (override val db:Database,
           description = Some(s"Home project for user ${user.name}"),
           enabled = false,
           displayName = Some(s"${user.osmProfile.displayName}'s Project")
-        ), User.superUser).id
+        ), user).id
     }
     // make sure the user is an admin of this project
     if (!user.groups.exists(g => g.projectId == homeProjectId)) {

@@ -13,7 +13,7 @@ import org.apache.commons.lang3.StringUtils
 import org.maproulette.actions._
 import org.maproulette.controllers.ParentController
 import org.maproulette.data.{ActionSummary, ChallengeSummary}
-import org.maproulette.exception.{MPExceptionUtil, NotFoundException, StatusMessage}
+import org.maproulette.exception.{InvalidException, MPExceptionUtil, NotFoundException, StatusMessage}
 import org.maproulette.models.dal._
 import org.maproulette.models._
 import org.maproulette.permissions.Permission
@@ -21,11 +21,13 @@ import org.maproulette.services.ChallengeService
 import org.maproulette.session.{SearchParameters, SessionManager, User}
 import org.maproulette.utils.Utils
 import play.api.http.HttpEntity
+import play.api.libs.Files
 import play.api.libs.json._
 import play.api.libs.ws.WSClient
 import play.api.mvc._
 
 import scala.concurrent.{Future, Promise}
+import scala.io.Source
 import scala.util.{Failure, Success}
 
 /**
@@ -124,7 +126,7 @@ class ChallengeController @Inject()(override val childController: TaskController
       case Some(local) => Some(Json.stringify(local))
       case None => None
     }
-    if (!this.challengeService.buildChallengeTasks(user, createdObject, localJson)) {
+    if (!this.challengeService.buildTasks(user, createdObject, localJson)) {
       super.extractAndCreate(body, createdObject, user)
     }
     // we need to elevate the user permissions to super users to extract and create the tags
@@ -318,11 +320,11 @@ class ChallengeController @Inject()(override val childController: TaskController
     * Retrieve all the comments for a specific challenge
     *
     * @param challengeId The id of the challenge
-    * @return A map of task id's to comments that exist for a specific challenge
+    * @return A list of comments that exist for a specific challenge
     */
   def retrieveComments(challengeId:Long, limit:Int, page:Int) : Action[AnyContent] = Action.async { implicit request =>
     this.sessionManager.authenticatedRequest { implicit user =>
-      Ok(Json.toJson(this.dalManager.task.retrieveCommentsForChallenge(challengeId, limit, page).map(c => c._1+"" -> c._2)))
+      Ok(Json.toJson(this.dalManager.task.retrieveComments(List.empty, List(challengeId), List.empty, limit, page)))
     }
   }
 
@@ -344,13 +346,11 @@ class ChallengeController @Inject()(override val childController: TaskController
   }
 
   private def _extractComments(challengeId:Long, limit:Int, page:Int, host:String) : Seq[String] = {
-    val comments = this.dalManager.task.retrieveCommentsForChallenge(challengeId, limit, page)
+    val comments = this.dalManager.task.retrieveComments(List.empty, List(challengeId), List.empty, limit, page)
     val urlPrefix = s"http://$host/"
-    comments.flatMap(c =>
-      c._2.map(comment =>
-        s"""$challengeId,${c._1},${comment.osm_id},${comment.osm_username},"${comment.comment}",${urlPrefix}map/$challengeId/${c._1}"""
-      )
-    ).toSeq
+    comments.map(comment =>
+      s"""${comment.projectId},$challengeId,${comment.taskId},${comment.osm_id},${comment.osm_username},"${comment.comment}",${urlPrefix}map/$challengeId/${comment.taskId}"""
+    )
   }
 
   /**
@@ -424,41 +424,37 @@ class ChallengeController @Inject()(override val childController: TaskController
       val baseURL = s"https://raw.githubusercontent.com/$username/$repo/master/${name}_";
       this.wsClient.url(s"${baseURL}create.json").get onComplete {
         case Success(response) =>
-          this.wsClient.url(s"${baseURL}geojson.json").get onComplete {
-            case Success(jsonResp) =>
-              try {
-                // inject the info link into the challenge
-                val challengeJson = Utils.insertIntoJson(
-                  Utils.insertIntoJson(response.json, "infoLink", s"${baseURL}info.md", false),
-                  "localGeoJSON",
-                  jsonResp.json,
-                  true
-                )
-                val challengeName = (challengeJson \ "name").asOpt[String].getOrElse(name)
-                // look for the challenge, if the name exists we will attempt to update the challenge
-                val challengeID = this.dal.retrieveByName(challengeName, projectId) match {
-                  case Some(c) => c.id
-                  case None => -1
-                }
-                val updatedBody = this.updateCreateBody(Utils.insertIntoJson(challengeJson, "parent", projectId), user)
-                if (challengeID > 0) {
-                  // if rebuild set to true, remove all the tasks first from the challenge before recreating them
-                  this.dal.deleteTasks(user, challengeID)
-                  // if you provide the ID in the post method we will send you to the update path
-                  this.internalUpdate(updatedBody, user)(challengeID.toString, -1) match {
-                    case Some(value) => result success Ok(this.inject(value))
-                    case None => result success NotModified
-                  }
-                } else {
-                  this.internalCreate(updatedBody, updatedBody.validate[Challenge].get, user) match {
-                    case Some(value) => result success Ok(this.inject(value))
-                    case None => result success NotModified
-                  }
-                }
-              } catch {
-                case e:Throwable => result success MPExceptionUtil.manageException(e)
+          try {
+            // inject the info link into the challenge
+            val challengeJson = Utils.insertIntoJson(
+              Utils.insertIntoJson(response.json, "infoLink", s"${baseURL}info.md", false),
+              "remoteGeoJson",
+              s"${baseURL}geojson_{x}.json",
+              true
+            )
+            val challengeName = (challengeJson \ "name").asOpt[String].getOrElse(name)
+            // look for the challenge, if the name exists we will attempt to update the challenge
+            val challengeID = this.dal.retrieveByName(challengeName, projectId) match {
+              case Some(c) => c.id
+              case None => -1
+            }
+            val updatedBody = this.updateCreateBody(Utils.insertIntoJson(challengeJson, "parent", projectId), user)
+            if (challengeID > 0) {
+              // if rebuild set to true, remove all the tasks first from the challenge before recreating them
+              this.dal.deleteTasks(user, challengeID)
+              // if you provide the ID in the post method we will send you to the update path
+              this.internalUpdate(updatedBody, user)(challengeID.toString, -1) match {
+                case Some(value) => result success Ok(this.inject(value))
+                case None => result success NotModified
               }
-            case Failure(error) => throw error
+            } else {
+              this.internalCreate(updatedBody, updatedBody.validate[Challenge].get, user) match {
+                case Some(value) => result success Ok(this.inject(value))
+                case None => result success NotModified
+              }
+            }
+          } catch {
+            case e:Throwable => result success MPExceptionUtil.manageException(e)
           }
         case Failure(error) => throw error
       }
@@ -545,10 +541,53 @@ class ChallengeController @Inject()(override val childController: TaskController
       dalManager.challenge.retrieveById(challengeId) match {
         case Some(c) =>
           permission.hasWriteAccess(ProjectType(), user)(c.general.parent)
-          challengeService.rebuildChallengeTasks(user, c)
+          challengeService.rebuildTasks(user, c)
           Ok
         case None => throw new NotFoundException(s"No challenge found with id $challengeId")
       }
     }
   }
+
+  def addTasksToChallenge(challengeId:Long) : Action[AnyContent] = Action.async { implicit request =>
+    sessionManager.authenticatedRequest { implicit user =>
+      dalManager.challenge.retrieveById(challengeId) match {
+        case Some(c) =>
+          permission.hasObjectWriteAccess(c, user)
+          request.body.asText match {
+            case Some(j) =>
+              challengeService.createTasksFromJson(user, c, j)
+              NoContent
+            case None =>
+              throw new InvalidException("No json data provided to create new tasks from")
+          }
+        case None =>
+          throw new NotFoundException(s"No challenge found with id $challengeId")
+      }
+    }
+  }
+
+  def addTasksToChallengeFromFile(challengeId:Long, lineByLine:Boolean) : Action[MultipartFormData[Files.TemporaryFile]] =
+    Action.async(parse.multipartFormData) { implicit request => {
+      sessionManager.authenticatedRequest { implicit user =>
+        dalManager.challenge.retrieveById(challengeId) match {
+          case Some(c) =>
+            permission.hasObjectWriteAccess(c, user)
+            request.body.file("json") match {
+              case Some(f) if StringUtils.isNotEmpty(f.filename) =>
+                // todo this should probably be streamed instead of all pulled into memory
+                val sourceData = Source.fromFile(f.ref.file).getLines()
+                if (lineByLine) {
+                  sourceData.foreach(challengeService.createTaskFromJson(user, c, _))
+                } else {
+                  challengeService.createTasksFromJson(user, c, sourceData.mkString)
+                }
+                NoContent
+              case _ =>
+                throw new InvalidException(s"No json uploaded with request to add tasks from")
+            }
+          case None =>
+            throw new NotFoundException(s"No challenge found with id $challengeId")
+        }
+      }
+    }}
 }

@@ -166,10 +166,11 @@ class FormEditController @Inject() (val messagesApi: MessagesApi,
                 val rerun = request.body.dataParts.getOrElse("rerun", Vector("false")).head.toBoolean
                 if (itemId < 0 || rerun) {
                   val uploadData = request.body.file("localGeoJSON") match {
-                    case Some(f) if StringUtils.isNotEmpty(f.filename) => Some(Source.fromFile(f.ref.file).getLines().mkString)
+                    case Some(f) if StringUtils.isNotEmpty(f.filename) =>
+                      Some(Source.fromFile(f.ref.file).getLines().mkString("\n"))
                     case _ => None
                   }
-                  challengeService.buildChallengeTasks(user, updatedChallenge, uploadData)
+                  challengeService.buildTasks(user, updatedChallenge, uploadData)
                 }
 
                 dal.updateItemTagNames(updatedChallenge.id, tags, user)
@@ -186,7 +187,7 @@ class FormEditController @Inject() (val messagesApi: MessagesApi,
       permission.hasWriteAccess(ProjectType(), user)(parentId)
       dalManager.challenge.retrieveById(challengeId) match {
         case Some(c) =>
-          challengeService.rebuildChallengeTasks(user, c)
+          challengeService.rebuildTasks(user, c)
           Ok
         case None => throw new NotFoundException(s"No challenge found with id $challengeId")
       }

@@ -283,7 +283,7 @@ class TaskController @Inject() (override val sessionManager: SessionManager,
     */
   def retrieveComments(taskId:Long) : Action[AnyContent] = Action.async { implicit request =>
     this.sessionManager.userAwareRequest { implicit user =>
-      Ok(Json.toJson(this.dal.retrieveComments(taskId)))
+      Ok(Json.toJson(this.dal.retrieveComments(List.empty, List.empty, List(taskId))))
     }
   }
 

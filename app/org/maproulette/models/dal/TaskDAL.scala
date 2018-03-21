@@ -80,11 +80,13 @@ class TaskDAL @Inject()(override val db: Database,
     get[Long]("task_comments.osm_id") ~
     get[String]("users.name") ~
     get[Long]("task_comments.task_id") ~
+    get[Long]("task_comments.challenge_id") ~
+    get[Long]("task_comments.project_id") ~
     get[DateTime]("task_comments.created") ~
     get[String]("task_comments.comment") ~
     get[Option[Long]]("task_comments.action_id") map {
-      case id ~ osm_id ~ osm_name ~ task_id ~ created ~ comment ~ action_id =>
-        Comment(id, osm_id, osm_name, task_id, created, comment, action_id)
+      case id ~ osm_id ~ osm_name ~ taskId ~ challengeId ~ projectId ~ created ~ comment ~ action_id =>
+        Comment(id, osm_id, osm_name, taskId, challengeId, projectId, created, comment, action_id)
     }
   }
 
@@ -859,39 +861,38 @@ class TaskDAL @Inject()(override val db: Database,
   }
 
   /**
-    * Retrieves all the comments for a task
+    * Retrieves all the comments for a task, challenge or project
     *
-    * @param taskId The id of the task
+    * @param projectIdList A list of all project ids to match on
+    * @param challengeIdList A list of all challenge ids to match on
+    * @param taskIdList A list of all task ids to match on
+    * @param limit limit the number of tasks in the response
+    * @param offset for paging
     * @param c
     * @return The list of comments for the task
     */
-  def retrieveComments(taskId:Long)(implicit c:Option[Connection] = None) : List[Comment] = {
+  def retrieveComments(projectIdList:List[Long], challengeIdList:List[Long], taskIdList:List[Long],
+                       limit:Int = Config.DEFAULT_LIST_SIZE, offset:Int = 0)(implicit c:Option[Connection] = None) : List[Comment] = {
     withMRConnection { implicit c =>
-      SQL("""SELECT * FROM task_comments tc
-              INNER JOIN users u ON u.osm_id = tc.osm_id
-              WHERE task_id = {taskId}
-              ORDER BY tc.created DESC"""
-      ).on('taskId -> taskId).as(this.commentParser.*)
-    }
-  }
+      val whereClause = new StringBuilder("")
+      if (projectIdList.nonEmpty) {
+        this.appendInWhereClause(whereClause, s"project_id IN (${projectIdList.mkString(",")})")
+      }
+      if (challengeIdList.nonEmpty) {
+        this.appendInWhereClause(whereClause, s"challenge_id IN (${challengeIdList.mkString(",")})")
+      }
+      if (taskIdList.nonEmpty) {
+        this.appendInWhereClause(whereClause, s"challenge_id IN (${taskIdList.mkString(",")})")
+      }
 
-  /**
-    * Retrieves a map of all the comments for all the tasks in a challenge
-    *
-    * @param challengeId The challenge to retrieve the comments for
-    * @param c An option connection
-    * @return A map of task id's to list of comments
-    */
-  def retrieveCommentsForChallenge(challengeId:Long, limit:Int = Config.DEFAULT_LIST_SIZE, offset:Int = 0)(implicit c:Option[Connection] = None) : Map[Long, List[Comment]] = {
-    withMRConnection { implicit c =>
-      SQL"""SELECT * FROM task_comments tc
-            INNER JOIN users u ON u.osm_id = tc.osm_id
-            INNER JOIN tasks t ON t.id = tc.task_id
-            WHERE t.parent_id = $challengeId
-            ORDER BY t.parent_id, tc.created DESC
-            LIMIT #${this.sqlLimit(limit)} OFFSET $offset""".as((long("task_id") ~ this.commentParser).*)
-        .groupBy(_._1)
-        .map(tuple => (tuple._1, tuple._2.map(_._2)))
+      SQL(s"""
+              SELECT * FROM task_comments tc
+              INNER JOIN users u ON u.osm_id = tc.osm_id
+              WHERE $whereClause
+              ORDER BY tc.project_id, tc.challenge_id, tc.created DESC
+              LIMIT ${this.sqlLimit(limit)} OFFSET $offset
+          """
+      ).as(this.commentParser.*)
     }
   }
 
@@ -919,7 +920,7 @@ class TaskDAL @Inject()(override val db: Database,
                     'comment -> comment,
                     'action_id -> actionId).as(long("id").*).headOption match {
         case Some(commentId) =>
-          Comment(commentId, user.osmProfile.id, user.name, taskId, DateTime.now(), comment, actionId)
+          Comment(commentId, user.osmProfile.id, user.name, taskId, -1, -1, DateTime.now(), comment, actionId)
         case None => throw new Exception("Failed to add comment")
       }
     }

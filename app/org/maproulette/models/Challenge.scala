@@ -66,6 +66,7 @@ case class Challenge(override val id:Long,
                      priority:ChallengePriority,
                      extra:ChallengeExtra,
                      status:Option[Int]=Some(0),
+                     statusMessage:Option[String]=None,
                      location:Option[String]=None,
                      bounding:Option[String]=None) extends BaseObject[Long] with DefaultWrites {
 
@@ -186,6 +187,7 @@ object Challenge {
         "updateTasks" -> default(boolean, false)
       )(ChallengeExtra.apply)(ChallengeExtra.unapply),
       "status" -> default(optional(number), None),
+      "statusMessage" -> optional(text),
       "location" -> default(optional(text), None),
       "bounding" -> default(optional(text), None)
     )(Challenge.apply)(Challenge.unapply)
