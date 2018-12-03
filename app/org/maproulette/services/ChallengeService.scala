@@ -231,7 +231,11 @@ class ChallengeService @Inject() (challengeDAL: ChallengeDAL, taskDAL: TaskDAL,
     try {
       val createdTasks = featureList.flatMap { value =>
         if (!single) {
-          this.createNewTask(user, taskNameFromJsValue(value), parent, (value \ "geometry").as[JsObject], getProperties(value, "properties"))
+          (value \ "geometry").asOpt[JsObject] match {
+            case Some(geometry) =>
+              this.createNewTask(user, taskNameFromJsValue(value), parent, geometry, getProperties(value, "properties"))
+            case None => None // skip task if no geometry
+          }
         } else {
           None
         }
