@@ -1024,6 +1024,17 @@ class TaskDAL @Inject()(override val db: Database,
             """)
         parameters += ('statusList -> ToParameterValue.apply[List[Int]].apply(taskStatusList))
 
+        // Make sure that the user doesn't see the same task multiple times in
+        // the same hour. This prevents users from getting stuck at a priority
+        // boundary when there is only one task remaining that they're trying
+        // to skip, and also prevents the user from getting bounced between a
+        // small number of nearby skipped tasks when loading by proximity
+        appendInWhereClause(whereClause,
+          s"""NOT tasks.id IN (
+              |SELECT task_id FROM status_actions
+              |WHERE osm_user_id IN (${user.osmProfile.id})
+              |  AND created >= NOW() - '1 hour'::INTERVAL)""".stripMargin)
+
         priority match {
           case Some(p) => appendInWhereClause(whereClause, s"tasks.priority = $p")
           case None => //Ignore
@@ -1041,14 +1052,8 @@ class TaskDAL @Inject()(override val db: Database,
 
         val proximityOrdering = proximityId match {
           case Some(id) =>
-            // This where clause will make sure that the user doesn't see the same task multiple times in the same hour.
-            // It addresses a specific issue with proximity that can cause a user to get into an infinite loop
-            appendInWhereClause(whereClause,
-              s"""NOT tasks.id IN (
-                 |SELECT task_id FROM status_actions
-                 |WHERE osm_user_id IN (${user.osmProfile.id})
-                 |  AND created >= NOW() - '1 hour'::INTERVAL
-                 |UNION SELECT $id)""".stripMargin)
+            // Be sure not to serve the task the user just came from
+            appendInWhereClause(whereClause, s"tasks.id != $id")
             s"ST_Distance(tasks.location, (SELECT location FROM tasks WHERE id = $id)),"
           case None => ""
         }
