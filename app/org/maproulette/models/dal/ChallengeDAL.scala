@@ -619,6 +619,7 @@ class ChallengeDAL @Inject()(override val db: Database, taskDAL: TaskDAL,
                       WHERE featured = TRUE ${this.enabled(enabledOnly, "c")} ${this.enabled(enabledOnly, "p")}
                       AND c.deleted = false and p.deleted = false
                       AND (c.status <> ${Challenge.STATUS_BUILDING} AND
+                           c.status <> ${Challenge.STATUS_DELETING_TASKS} AND
                            c.status <> ${Challenge.STATUS_FAILED} AND
                            c.status <> ${Challenge.STATUS_FINISHED})
                       AND 0 < (SELECT COUNT(*) FROM tasks WHERE parent_id = c.id)
@@ -644,6 +645,7 @@ class ChallengeDAL @Inject()(override val db: Database, taskDAL: TaskDAL,
                       WHERE c.deleted = false and p.deleted = false
                       ${this.enabled(enabledOnly, "c")} ${this.enabled(enabledOnly, "p")}
                       AND (c.status <> ${Challenge.STATUS_BUILDING} AND
+                           c.status <> ${Challenge.STATUS_DELETING_TASKS} AND
                            c.status <> ${Challenge.STATUS_FAILED} AND
                            c.status <> ${Challenge.STATUS_FINISHED})
                       AND 0 < (SELECT COUNT(*) FROM tasks WHERE parent_id = c.id)
@@ -668,6 +670,7 @@ class ChallengeDAL @Inject()(override val db: Database, taskDAL: TaskDAL,
                       WHERE ${this.enabled(enabledOnly, "c")(None)} ${this.enabled(enabledOnly, "p")}
                       AND c.deleted = false and p.deleted = false
                       AND (c.status <> ${Challenge.STATUS_BUILDING} AND
+                           c.status <> ${Challenge.STATUS_DELETING_TASKS} AND
                            c.status <> ${Challenge.STATUS_FAILED} AND
                            c.status <> ${Challenge.STATUS_FINISHED})
                       ${this.order(Some("created"), "DESC", "c", true)}
@@ -958,10 +961,16 @@ class ChallengeDAL @Inject()(override val db: Database, taskDAL: TaskDAL,
       val filter = if (statusFilter.isEmpty) {
         ""
       } else {
-        s"AND status IN (${statusFilter.mkString(",")}"
+        s"AND status IN (${statusFilter.mkString(",")})"
       }
-      val query = s"""DELETE FROM tasks WHERE parent_id = {challengeId} $filter"""
-      SQL(query).on('challengeId -> challengeId).executeUpdate()
+
+      // Deleting tasks can be time consuming (~1 second per 15-20 tasks), so work in batches
+      val query = s"""DELETE FROM tasks WHERE id in (SELECT id from tasks WHERE parent_id = {challengeId} $filter LIMIT 50)"""
+      var deleteCount = 0
+      do {
+        deleteCount = SQL(query).on('challengeId -> challengeId).executeUpdate()
+      }
+      while(deleteCount > 0)
     }
   }
 

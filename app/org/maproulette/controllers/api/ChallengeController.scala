@@ -348,8 +348,30 @@ class ChallengeController @Inject()(override val childController: TaskController
     */
   def deleteTasks(challengeId: Long, statusFilters: String = ""): Action[AnyContent] = Action.async { implicit request =>
     this.sessionManager.authenticatedRequest { implicit user =>
-      this.dal.deleteTasks(user, challengeId, Utils.split(statusFilters).map(_.toInt))
-      Ok
+      dalManager.challenge.retrieveById(challengeId) match {
+        case Some(c) =>
+          permission.hasWriteAccess(ProjectType(), user)(c.general.parent)
+          if (c.status.get == Challenge.STATUS_DELETING_TASKS) {
+            throw new InvalidException("Task deletion already in-progress for this challenge")
+          }
+          else if (c.status.get == Challenge.STATUS_BUILDING) {
+            throw new InvalidException("Tasks cannot be deleted while challenge is building")
+          }
+
+          val originalStatus = c.status
+          dalManager.challenge.update(Json.obj("status" -> Challenge.STATUS_DELETING_TASKS), user)(challengeId)
+          // Deleting a lot of tasks can be time consuming, so perform this asynchronously
+          Future {
+            try {
+              this.dal.deleteTasks(user, challengeId, Utils.split(statusFilters).map(_.toInt))
+            }
+            finally {
+              dalManager.challenge.update(Json.obj("status" -> originalStatus), user)(challengeId)
+            }
+          }
+          Ok
+        case None => throw new NotFoundException(s"No challenge found with id $challengeId")
+      }
     }
   }
 
@@ -696,6 +718,13 @@ class ChallengeController @Inject()(override val childController: TaskController
       dalManager.challenge.retrieveById(challengeId) match {
         case Some(c) =>
           permission.hasWriteAccess(ProjectType(), user)(c.general.parent)
+          if (c.status.get == Challenge.STATUS_DELETING_TASKS) {
+            throw new InvalidException("Challenge cannot be rebuilt while undergoing bulk task deletion")
+          }
+          else if (c.status.get == Challenge.STATUS_BUILDING) {
+            throw new InvalidException("Task build is already in progress for this challenge")
+          }
+
           challengeProvider.rebuildTasks(user, c, removeUnmatched)
           Ok
         case None => throw new NotFoundException(s"No challenge found with id $challengeId")
@@ -708,6 +737,13 @@ class ChallengeController @Inject()(override val childController: TaskController
       dalManager.challenge.retrieveById(challengeId) match {
         case Some(c) =>
           permission.hasObjectWriteAccess(c, user)
+          if (c.status.get == Challenge.STATUS_DELETING_TASKS) {
+            throw new InvalidException("Tasks cannot be added while challenge is undergoing bulk task deletion")
+          }
+          else if (c.status.get == Challenge.STATUS_BUILDING) {
+            throw new InvalidException("Tasks cannot be added while challenge is being built")
+          }
+
           request.body.asText match {
             case Some(j) =>
               challengeProvider.createTasksFromJson(user, c, j)
@@ -727,6 +763,13 @@ class ChallengeController @Inject()(override val childController: TaskController
         dalManager.challenge.retrieveById(challengeId) match {
           case Some(c) =>
             permission.hasObjectWriteAccess(c, user)
+            if (c.status.get == Challenge.STATUS_DELETING_TASKS) {
+              throw new InvalidException("Tasks cannot be added while challenge is undergoing bulk task deletion")
+            }
+            else if (c.status.get == Challenge.STATUS_BUILDING) {
+              throw new InvalidException("Tasks cannot be added while challenge is being built")
+            }
+
             request.body.file("json") match {
               case Some(f) if StringUtils.isNotEmpty(f.filename) =>
                 if (removeUnmatched) {
