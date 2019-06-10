@@ -1007,7 +1007,7 @@ class ChallengeDAL @Inject()(override val db: Database, taskDAL: TaskDAL,
       val joinClause = new StringBuilder()
       var orderByClause = ""
 
-      parameters ++= addSearchToQuery(searchParameters, whereClause)
+      parameters ++= addSearchToQuery(searchParameters, whereClause)(false)
 
       parameters ++= addChallengeTagMatchingToQuery(searchParameters, whereClause, joinClause)
 
