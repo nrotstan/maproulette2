@@ -251,6 +251,21 @@ class ChallengeController @Inject()(override val childController: TaskController
   }
 
   /**
+    * Gets tasks near the given task id within the given challenge
+    *
+    * @param challengeId  The challenge id that is the parent of the tasks that you would be searching for
+    * @param proximityId  Id of task for which nearby tasks are desired
+    * @param limit        The maximum number of nearby tasks to return
+    * @return
+    */
+  def getNearbyTasks(challengeId: Long, proximityId: Long, limit: Int): Action[AnyContent] = Action.async { implicit request =>
+    this.sessionManager.userAwareRequest { implicit user =>
+      val results = this.dalManager.task.getNearbyTasks(User.userOrMocked(user), challengeId, proximityId, limit)
+      Ok(Json.toJson(results))
+    }
+  }
+
+  /**
     * Gets the next task in sequential order for the specified challenge
     *
     * @param challengeId   The current challenge id
