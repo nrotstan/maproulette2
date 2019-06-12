@@ -1075,6 +1075,31 @@ class TaskDAL @Inject()(override val db: Database,
   }
 
   /**
+    * Retrieve tasks geographically closest to the given task id within the
+    * given challenge. Ignores tasks that are complete, locked by other users,
+    * or that the current user has worked on in the last hour
+    */
+  def getNearbyTasks(user: User, challengeId: Long, proximityId: Long, limit: Int = 5)
+                    (implicit c: Option[Connection] = None): List[Task] = {
+    val query = s"""SELECT tasks.$retrieveColumnsWithReview FROM tasks
+      LEFT JOIN locked l ON l.item_id = tasks.id
+      LEFT OUTER JOIN task_review ON task_review.task_id = tasks.id
+      WHERE tasks.id <> $proximityId AND
+            tasks.parent_id = $challengeId AND
+            (l.id IS NULL OR l.user_id = ${user.id}) AND
+            tasks.status IN (0, 3, 6) AND
+            NOT tasks.id IN (
+                SELECT task_id FROM status_actions
+                WHERE osm_user_id = ${user.osmProfile.id} AND created >= NOW() - '1 hour'::INTERVAL)
+      ORDER BY ST_Distance(tasks.location, (SELECT location FROM tasks WHERE id = $proximityId)), tasks.status, RANDOM()
+      LIMIT ${this.sqlLimit(limit)}"""
+
+    this.withMRTransaction { implicit c =>
+      SQL(query).as(this.parser.*)
+    }
+  }
+
+  /**
     * Retrieves a random challenge from the list of possible challenges in the search list
     *
     * @param params The params to search for the random challenge
