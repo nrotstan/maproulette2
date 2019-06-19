@@ -181,6 +181,27 @@ class TaskDAL @Inject()(override val db: Database,
   }
 
   /**
+    * Retrieves the object based on the name, this function is somewhat weak as there could be
+    * multiple objects with the same name. The database only restricts the same name in combination
+    * with a parent. So this will just return the first one it finds. With caching, so if it finds
+    * the object in the cache it will return that object without checking the database, otherwise
+    * will hit the database directly.
+    *
+    * @param name The name you are looking up by
+    * @return The object that you are looking up, None if not found
+    */
+  override def retrieveByName(implicit name: String, parentId: Long = (-1), c: Option[Connection] = None): Option[Task] = {
+    this.cacheManager.withOptionCaching { () =>
+      this.withMRConnection { implicit c =>
+        val query = s"SELECT $retrieveColumnsWithReview FROM ${this.tableName} " +
+                    s"LEFT OUTER JOIN task_review ON task_review.task_id = tasks.id " +
+                    s"WHERE name = {name} ${this.parentFilter(parentId)}"
+        SQL(query).on('name -> name).as(this.parser.*).headOption
+      }
+    }
+  }
+
+  /**
     * This will retrieve the root object in the hierarchy of the object, by default the root
     * object is itself.
     *
