@@ -1699,8 +1699,11 @@ GET     /challenge/:cid/tasks/randomTasks           @org.maproulette.controllers
 #   - name: limit
 #     in: query
 #     description: Limit the number of results returned in the response. Default value is 1.
+#   - name: proximity
+#     in: query
+#     description: Id of task that you wish to find the next task based on the proximity of that task
 ###
-GET     /challenge/:cid/tasks/prioritizedTasks      @org.maproulette.controllers.api.ChallengeController.getRandomTasksWithPriority(cid:Long, s:String ?= "", tags:String ?= "", limit:Int ?= 1)
+GET     /challenge/:cid/tasks/prioritizedTasks      @org.maproulette.controllers.api.ChallengeController.getRandomTasksWithPriority(cid:Long, s:String ?= "", tags:String ?= "", limit:Int ?= 1, proximity:Long ?= -1)
 ###
 # tags: [ Challenge ]
 # summary: Retrieves next Task
