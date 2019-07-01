@@ -54,8 +54,7 @@ class TagDAL @Inject()(override val db: Database,
     this.cacheManager.withOptionCaching { () =>
       this.withMRTransaction { implicit c =>
         SQL("INSERT INTO tags (name, description, tag_type) VALUES ({name}, {description}, {tagType}) ON CONFLICT(LOWER(name)) DO NOTHING RETURNING *")
-          .on('name -> tag.name.toLowerCase, 'description -> tag.description,
-              'tag_type -> tag.tagType).as(this.parser.*).headOption
+          .on('name -> tag.name.toLowerCase, 'description -> tag.description,'tagType -> tag.tagType).as(this.parser.*).headOption
       }
     } match {
       case Some(t) => t

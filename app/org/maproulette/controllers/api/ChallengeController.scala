@@ -387,10 +387,10 @@ class ChallengeController @Inject()(override val childController: TaskController
       dalManager.challenge.retrieveById(challengeId) match {
         case Some(c) =>
           permission.hasWriteAccess(ProjectType(), user)(c.general.parent)
-          if (c.status.get == Challenge.STATUS_DELETING_TASKS) {
+          if (c.status.getOrElse(Challenge.STATUS_NA) == Challenge.STATUS_DELETING_TASKS) {
             throw new InvalidException("Task deletion already in-progress for this challenge")
           }
-          else if (c.status.get == Challenge.STATUS_BUILDING) {
+          else if (c.status.getOrElse(Challenge.STATUS_NA) == Challenge.STATUS_BUILDING) {
             throw new InvalidException("Tasks cannot be deleted while challenge is building")
           }
 

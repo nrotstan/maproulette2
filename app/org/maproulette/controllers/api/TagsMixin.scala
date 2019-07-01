@@ -110,7 +110,8 @@ trait TagsMixin[T <: BaseObject[Long]] {
               // the same name or create a new tag with the current name
               this.tagDAL.retrieveByName(tag) match {
                 case Some(t) => t.asInstanceOf[Tag]
-                case None => Tag(-1, tag)
+                case None =>
+                  Tag(-1, tag, tagType = this.dal.tableName)
               }
           }
         })

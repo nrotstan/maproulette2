@@ -305,13 +305,12 @@ class TaskDAL @Inject()(override val db: Database,
         case None => // ignore
       }
 
-      c.commit()
       // These updates were originally only done on insert or when the geometry actual was updated. However
       // a couple reasons why it is always performed. Firstly the location and geometry of a task is very
       // important and so it is vital that the database reflects the requirements from the user. And secondly
       // there were some issues where the database would not be updated and you may get null locations
       // or null geometries. So this always makes sure that the task data is correct
-      this.updateGeometries(updatedTaskId, Json.parse(element.geometries))
+      this.updateGeometries(updatedTaskId, Json.parse(element.geometries))(Some(c))
       element.suggestedFix match {
         case Some(value) => this.addSuggestedFix(updatedTaskId, Json.parse(value))
         case None => // just do nothing
