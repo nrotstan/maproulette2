@@ -1482,6 +1482,31 @@ class TaskDAL @Inject()(override val db: Database,
   }
 
   /**
+    * Creates a new task bundle with the given tasks, assigning ownership of
+    * the bundle to the given user
+    *
+    * @param user    The user who is to own the bundle
+    * @param name    The name of the task bundle
+    * @param taskIds The tasks to be added to the bundle
+    */
+  def createTaskBundle(user: User, name: String, taskIds: List[Long])(implicit c: Connection = null): TaskBundle = {
+    this.withMRTransaction { implicit c =>
+      val rowId = SQL"""INSERT INTO bundles (owner_id, name) VALUES (${user.id}, ${name})""".executeInsert()
+      rowId match {
+        case Some(bundleId) =>
+          val sqlQuery = s"""INSERT INTO task_bundles (task_id, bundle_id) VALUES ({taskId}, $bundleId)"""
+          val parameters = taskIds.map(taskId => {
+            Seq[NamedParameter]("taskId" -> taskId)
+          })
+          BatchSql(sqlQuery, parameters.head, parameters.tail: _*).execute()
+          TaskBundle(bundleId, user.id, taskIds)
+        case None =>
+          throw new Exception("Bundle creation failed")
+      }
+    }
+  }
+
+  /**
     * A temporary solution that will allow us to lazy update the geojson data
     *
     * @param taskId The identifier of the task

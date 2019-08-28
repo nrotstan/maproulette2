@@ -65,6 +65,8 @@ class TaskController @Inject()(override val sessionManager: SessionManager,
   implicit val tagChangeResultWrites = ChangeObjects.tagChangeResultWrites
   implicit val tagChangeSubmissionReads = ChangeObjects.tagChangeSubmissionReads
 
+  implicit val taskBundleWrites: Writes[TaskBundle] = TaskBundle.taskBundleWrites
+
   override def dalWithTags: TagDALMixin[Task] = dal
 
   /**
@@ -558,4 +560,21 @@ class TaskController @Inject()(override val sessionManager: SessionManager,
     }
   }
 
+  /**
+    * Creates a new task bundle with the task ids in the json body, assigning
+    * ownership of the bundle to the logged-in user
+    *
+    * @return A TaskBundle representing the new bundle
+    */
+  def createTaskBundle(): Action[JsValue] = Action.async(bodyParsers.json) { implicit request =>
+    this.sessionManager.authenticatedRequest { implicit user =>
+      val name = (request.body \ "name").asOpt[String].getOrElse("")
+      val taskIds = (request.body \ "taskIds").asOpt[List[Long]] match {
+        case Some(tasks) => tasks
+        case None => throw new InvalidException("No task ids provided for task bundle")
+      }
+      val bundle = dal.createTaskBundle(user, name, taskIds)
+      Ok(Json.toJson(bundle))
+    }
+  }
 }
