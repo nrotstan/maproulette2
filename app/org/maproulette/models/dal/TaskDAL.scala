@@ -447,6 +447,35 @@ class TaskDAL @Inject()(override val db: Database,
   }
 
   /**
+    * Retrieves a list of objects from the supplied list of ids. Will check for any objects currently
+    * in the cache and those that aren't will be retrieved from the database
+    *
+    * @param limit  The limit on the number of objects returned. This is not entirely useful as a limit
+    *               could be set simply by how many ids you supplied in the list, but possibly useful
+    *               for paging
+    * @param offset For paging, ie. the page number starting at 0
+    * @param ids    The list of ids to be retrieved
+    * @return A list of objects, empty list if none found
+    */
+  override def retrieveListById(limit: Int = -1, offset: Int = 0)(implicit ids: List[Long], c: Option[Connection] = None): List[Task] = {
+    if (ids.isEmpty) {
+      List.empty
+    } else {
+      this.cacheManager.withIDListCaching { implicit uncachedIDs =>
+        this.withMRConnection { implicit c =>
+          val query =
+            s"""SELECT ${retrieveColumnsWithReview} FROM ${this.tableName}
+                LEFT OUTER JOIN task_review ON task_review.task_id = tasks.id
+                WHERE tasks.id IN ({inString})
+                LIMIT ${this.sqlLimit(limit)} OFFSET {offset}"""
+          SQL(query).on('inString -> ToParameterValue.apply[List[Long]](s = keyToSQL, p = keyToStatement).apply(uncachedIDs),
+            'offset -> offset).as(this.parser.*)
+        }
+      }
+    }
+  }
+
+  /**
     * Sets the task for a given user. The user cannot set the status of a task unless the object has
     * been locked by the same user before hand.
     * Will throw an InvalidException if the task status cannot be set due to the current task status
@@ -1491,15 +1520,19 @@ class TaskDAL @Inject()(override val db: Database,
     */
   def createTaskBundle(user: User, name: String, taskIds: List[Long])(implicit c: Connection = null): TaskBundle = {
     this.withMRTransaction { implicit c =>
+      val lockedTasks = this.withListLocking(user, Some(TaskType())) { () =>
+        this.retrieveListById(-1, 0)(taskIds)
+      }
+
       val rowId = SQL"""INSERT INTO bundles (owner_id, name) VALUES (${user.id}, ${name})""".executeInsert()
       rowId match {
         case Some(bundleId) =>
           val sqlQuery = s"""INSERT INTO task_bundles (task_id, bundle_id) VALUES ({taskId}, $bundleId)"""
-          val parameters = taskIds.map(taskId => {
-            Seq[NamedParameter]("taskId" -> taskId)
+          val parameters = lockedTasks.map(task => {
+            Seq[NamedParameter]("taskId" -> task.id)
           })
           BatchSql(sqlQuery, parameters.head, parameters.tail: _*).execute()
-          TaskBundle(bundleId, user.id, taskIds)
+          TaskBundle(bundleId, user.id, lockedTasks.map(task => { task.id }), Some(lockedTasks))
         case None =>
           throw new Exception("Bundle creation failed")
       }

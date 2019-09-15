@@ -84,6 +84,10 @@ class Permission @Inject()(dalManager: Provider[DALManager]) {
         case TagType() =>
         case GroupType() =>
           this.hasProjectTypeAccess(user, Group.TYPE_ADMIN)(obj.asInstanceOf[Group].projectId)
+        case BundleType() =>
+          if (obj.asInstanceOf[Bundle].owner != user.osmProfile.id) {
+            throw new IllegalAccessException(s"Only super users or the owner of the bundle can write to it.")
+          }
         case _ =>
           throw new IllegalAccessException(s"Unknown object type ${obj.itemType.toString}")
       }

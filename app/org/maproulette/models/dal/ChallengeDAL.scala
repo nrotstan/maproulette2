@@ -813,7 +813,7 @@ class ChallengeDAL @Inject()(override val db: Database, taskDAL: TaskDAL,
                         (implicit c: Option[Connection] = None): List[ClusteredPoint] = {
     this.withMRConnection { implicit c =>
       val filter = statusFilter match {
-        case Some(s) => s"AND status IN (${s.mkString(",")}"
+        case Some(s) => s"AND t.status IN (${s.mkString(",")})"
         case None => ""
       }
       val clusteredList = SQL"""SELECT t.id, t.name, t.instruction, t.status, t.mapped_on,

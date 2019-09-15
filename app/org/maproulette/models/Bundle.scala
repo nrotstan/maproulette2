@@ -31,7 +31,7 @@ object Bundle {
   *
   * @author nrotstan
   */
-case class TaskBundle(bundle_id: Long, owner_id: Long, taskIds: List[Long]) extends DefaultWrites
+case class TaskBundle(bundle_id: Long, owner_id: Long, taskIds: List[Long], tasks:Option[List[Task]]) extends DefaultWrites
 object TaskBundle {
   implicit val taskBundleWrites: Writes[TaskBundle] = Json.writes[TaskBundle]
   implicit val taskBundleReads: Reads[TaskBundle] = Json.reads[TaskBundle]
