@@ -197,6 +197,7 @@ class ChallengeProvider @Inject() (
       user: User,
       removeUnmatched: Boolean
   ): Unit = {
+    logger.info("*** buildTasksFromRemoteJSON beginning")
     this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_BUILDING), user)(challenge.id)
     if (removeUnmatched) {
       this.challengeDAL.removeIncompleteTasks(user)(challenge.id)
@@ -204,15 +205,19 @@ class ChallengeProvider @Inject() (
 
     val url     = filePrefix.replace("{x}", fileNumber.toString)
     val seqJSON = filePrefix.contains("{x}")
+    logger.info("*** Beginning remote request to url:")
+    logger.info(url)
     this.ws
       .url(url)
       .withRequestTimeout(this.config.getOSMQLProvider.requestTimeout)
       .get() onComplete {
       case Success(resp) =>
-        logger.debug("Creating tasks from remote GeoJSON file")
+        logger.info("*** Remote request successful")
+        logger.debug("*** Creating tasks from remote GeoJSON file")
         try {
           val splitJson = resp.body.split("\n")
           if (this.isLineByLineGeoJson(splitJson)) {
+            logger.info("*** Remote GeoJSON is LxL")
             splitJson.foreach { line =>
               val jsonData = Json.parse(normalizeRFC7464Sequence(line))
               this.createNewTask(
@@ -227,10 +232,13 @@ class ChallengeProvider @Inject() (
             )
             this.challengeDAL.markTasksRefreshed()(challenge.id)
           } else {
+            logger.info("*** Remote GeoJSON is standard")
             this.createTasksFromFeatures(user, challenge, Json.parse(resp.body))
           }
+          logger.info("*** Finished processing remote GeoJSON")
         } catch {
           case e: Exception =>
+            logger.info("*** Exception processing remote JSON")
             this.challengeDAL.update(
               Json.obj("status" -> Challenge.STATUS_FAILED, "statusMessage" -> e.getMessage),
               user
@@ -243,6 +251,7 @@ class ChallengeProvider @Inject() (
           this.challengeDAL.markTasksRefreshed()(challenge.id)
         }
       case Failure(f) =>
+        logger.info("*** Remote request failed")
         if (fileNumber > 1) {
           // todo need to figure out if actual failure or if not finding the next file
           this.challengeDAL.update(Json.obj("status" -> Challenge.STATUS_READY), user)(challenge.id)
